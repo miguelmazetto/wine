@@ -150,7 +150,7 @@ Call ok(Chr("120") = "x", "Chr(""120"") = " & Chr("120"))
 sub testChrError
     on error resume next
 
-    if isEnglishLang then
+    if MaxCharSize = 1 then
         call Err.clear()
         call Chr(-1)
         call ok(Err.number = 5, "Err.number = " & Err.number)
@@ -159,6 +159,13 @@ sub testChrError
         call Err.clear()
         call Chr(256)
         call ok(Err.number = 5, "Err.number = " & Err.number)
+    else
+        call Err.clear()
+        call Chr(-1)
+        call ok(Err.number = 0, "Err.number = " & Err.number)
+        call Err.clear()
+        call Chr(256)
+        call ok(Err.number = 0, "Err.number = " & Err.number)
     end if
 
     call Err.clear()
@@ -285,17 +292,43 @@ Call ok(Lbound(arr2) = 0, "Lbound(x) = " & Lbound(x))
 Call ok(Lbound(arr2, 1) = 0, "Lbound(x) = " & Lbound(x))
 Call ok(Lbound(arr2, 2) = 0, "Lbound(x) = " & Lbound(x))
 
+sub testLBoundError()
+    on error resume next
+    call Err.clear()
+    call LBound()
+    call ok(Err.number = 450, "Err.number = " & Err.number)
+    call Err.clear()
+    call LBound(Empty)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Err.clear()
+    call LBound(Null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Err.clear()
+    call LBound(arr, 1, 2)
+    call ok(Err.number = 450, "Err.number = " & Err.number)
+    if isEnglishLang then call ok(Err.description = "Wrong number of arguments or invalid property assignment", _
+                                  "Err.description = " & Err.description)
+end sub
+
 sub testUBoundError()
     on error resume next
     call Err.clear()
     call UBound()
     call ok(Err.number = 450, "Err.number = " & Err.number)
     call Err.clear()
+    call UBound(Empty)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Err.clear()
+    call UBound(Null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Err.clear()
     call UBound(arr, 1, 2)
     call ok(Err.number = 450, "Err.number = " & Err.number)
     if isEnglishLang then call ok(Err.description = "Wrong number of arguments or invalid property assignment", _
                                   "Err.description = " & Err.description)
 end sub
+
+call testLBoundError()
 call testUBoundError()
 
 Dim newObject
@@ -605,10 +638,59 @@ TestMid "test", 1, 2, "te"
 TestMid "test", 1, 0, ""
 TestMid "test", 1, 0, ""
 TestMid "test", 5, 2, ""
+TestMid 1234, 1, 2, "12"
+TestMid 1234, 5, 2, ""
 TestMid2 "test", 1, "test"
 TestMid2 "test", 2, "est"
 TestMid2 "test", 4, "t"
 TestMid2 "test", 5, ""
+TestMid2 1234, 5, ""
+
+sub TestMidError()
+    on error resume next
+    call Err.clear()
+    call Mid("test", "a", 1)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", "a", null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", "a", empty)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call Mid("test", 0, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", -1, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid(null, -1, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", 0, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", -1, null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", null, 2)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", null, -1)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid(null, -1, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", empty, 1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid("test", 0, empty)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Mid(empty, 0, 0)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+end sub
+call TestMidError()
 
 Sub TestUCase(str, ex)
     x = UCase(str)
@@ -777,6 +859,11 @@ sub testSpaceError()
 end sub
 call testSpaceError()
 
+function strlength(s1, s2, s3, s4, s5)
+   strlength = Len(s1 & s2 & s3 & s4 & s5)
+end function
+Call ok(strlength(String(500, "a"), String(500, "b"), String(500, "c"), String(500, "d"), String(500, "e")) = 500*5, "strlength(...) = 500*5")
+
 sub test_string(cnt, char, exp)
     call ok(String(cnt, char) = exp, "String(" & cnt & ", """ & char & """ = """ & _
                                      String(cnt, char) & """ expected """ & exp & """")
@@ -835,7 +922,30 @@ TestRight "test", 2, "st"
 TestRight "test", 5, "test"
 TestRight "test", 0, ""
 TestRight 123, 2, "23"
+TestRight "test", "3", "est"
+TestRight 123, "2", "23"
+TestRight empty, 0, ""
+TestRight empty, 1, ""
+TestRight "test", empty, ""
+TestRight "test", empty, ""
 if isEnglishLang then TestRight true, 2, "ue"
+call Right(null, 0)
+call ok(getVT(Right(null, 0)) = "VT_NULL", "getVT(Right(null, 0)) = " & getVT(Right(null, 0)))
+call ok(getVT(Right(null, 1)) = "VT_NULL", "getVT(Right(null, 1)) = " & getVT(Right(null, 1)))
+
+sub TestRightError()
+    on error resume next
+    call Err.clear()
+    call Right("test", -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Right(null, -1)
+    call ok(Err.number = 5, "Err.number = " & Err.number)
+    call Err.clear()
+    call Right("test", null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+end sub
+call TestRightError()
 
 Sub TestTrim(str, exstr)
     Call ok(Trim(str) = exstr, "Trim(" & str & ") = " & Trim(str))
@@ -1478,6 +1588,10 @@ Call ok(TypeName(True) = "Boolean", "TypeName(True) = " & TypeName(True))
 Call ok(getVT(TypeName(True)) = "VT_BSTR", "getVT(TypeName(True)) = " & getVT(TypeName(True)))
 Call ok(TypeName(arr) = "Variant()", "TypeName(arr) = " & TypeName(arr))
 Call ok(getVT(TypeName(arr)) = "VT_BSTR", "getVT(TypeName(arr)) = " & getVT(TypeName(arr)))
+Call ok(TypeName(collectionObj) = "Object", "TypeName(collectionObj) = " & TypeName(collectionObj))
+Dim regex
+set regex = new RegExp
+Call ok(TypeName(regex) = "IRegExp2", "TypeName(regex) = " & TypeName(regex))
 
 Call ok(VarType(Empty) = vbEmpty, "VarType(Empty) = " & VarType(Empty))
 Call ok(getVT(VarType(Empty)) = "VT_I2", "getVT(VarType(Empty)) = " & getVT(VarType(Empty)))
@@ -1558,6 +1672,7 @@ Call ok(Abs(True) = 1, "Abs(True) = " & Abs(True))
 Call ok(getVT(Abs(True)) = "VT_I2", "getVT(Abs(True)) = " & getVT(Abs(True)))
 Call ok(Abs(CByte(1)) = 1, "Abs(CByte(1)) = " & Abs(CByte(1)))
 Call ok(getVT(Abs(CByte(1))) = "VT_UI1", "getVT(Abs(CByte(1))) = " & getVT(Abs(CByte(1))))
+Call ok(Abs("30000") = 30000, "Abs(""30000"") = " & Abs("30000"))
 
 Sub testAbsError(strings, error_num1, error_num2)
     on error resume next
@@ -2215,5 +2330,180 @@ call testTimeSerial(50, 2, 1, 2, 2, 1, DateSerial(1900, 1, 1))
 call testTimeSerial(10, 60, 2, 11, 0, 2, DateSerial(1899, 12, 30))
 call testTimeSerial(10, 0, 60, 10, 1, 0, DateSerial(1899, 12, 30))
 call testTimeSerialError()
+
+sub testRnd(arg, expresult)
+    dim x
+    x = Rnd(arg)
+    call ok(x = expresult, "result = " & x & " expected " & expresult)
+    call ok(getVT(x) = "VT_R4*", "getVT = " & getVT(x))
+end sub
+
+' Initial seed value
+call testRnd(0, 327680 / 16777216)
+call testRnd(0, 327680 / 16777216)
+' Negative argument is a seed, does not use current RNG state
+call ok(Rnd(-2) = Rnd(-2), "Expected same result")
+call ok(Rnd(-1) <> Rnd(-2), "Expected differing result")
+
+sub testRandomizeError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = Randomize(0)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+' Randomize uses current RNG value, so it's reset using Rnd(-1)
+sub testRandomize()
+    dim x, y
+
+    Rnd(-1)
+    Randomize(123)
+    x = Rnd()
+    Randomize(123)
+    y = Rnd()
+    call ok(x <> y, "Expected differing result")
+    Rnd(-1)
+    Randomize(123)
+    y = Rnd()
+    call ok(x = y, "Expected same result")
+end sub
+
+call testRandomize()
+call testRandomizeError()
+
+sub testFormatCurrencyError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatCurrency(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatCurrency(1000,0,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatCurrency()
+    dim x
+
+    x = FormatCurrency(0)
+    x = FormatCurrency(-1000,,,-1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatCurrency()
+call testFormatCurrencyError()
+
+sub testFormatPercentError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatPercent(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatPercent(.10,0,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatPercent()
+    dim x
+
+    x = FormatPercent(0)
+    x = FormatPercent(.12,,,-1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatPercent()
+call testFormatPercentError()
+
+sub testFormatDateTimeError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatDateTime(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatDateTime(.10,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatDateTime()
+    dim x
+
+    x = FormatDateTime(0)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+    x = FormatDateTime(0.1,1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatDateTime()
+call testFormatDateTimeError()
+
+sub testFormatNumberError()
+    on error resume next
+    dim x
+    call Err.clear()
+    x = FormatNumber(null)
+    call ok(Err.number = 13, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+    call Err.clear()
+    x = FormatNumber(.10,0,0,0,null)
+    call ok(Err.number = 94, "Err.number = " & Err.number)
+    call ok(getVT(x) = "VT_EMPTY*", "getVT = " & getVT(x))
+end sub
+
+sub testFormatNumber()
+    dim x
+
+    x = FormatNumber(0)
+    x = FormatNumber(.12,,,-1)
+    call ok(getVT(x) = "VT_BSTR*", "getVT = " & getVT(x))
+end sub
+
+call testFormatNumber()
+call testFormatNumberError()
 
 Call reportSuccess()

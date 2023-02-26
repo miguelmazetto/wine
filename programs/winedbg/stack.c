@@ -250,7 +250,8 @@ static BOOL WINAPI sym_enum_cb(PSYMBOL_INFO sym_info, ULONG size, PVOID user)
     if (sym_info->Flags & SYMFLAG_PARAMETER)
     {
         if (!se->first) dbg_printf(", "); else se->first = FALSE;
-        symbol_print_local(sym_info, se->frame, FALSE);
+        dbg_printf("%s=", sym_info->Name);
+        symbol_print_localvalue(sym_info, se->frame, FALSE);
     }
     return TRUE;
 }
@@ -295,7 +296,7 @@ static void stack_print_addr_and_args(void)
             dbg_printf(" [%s:%lu]", il.FileName, il.LineNumber);
         dbg_printf(" in %s", im.ModuleName);
     }
-    else dbg_printf(" in %s (+0x%Ix)", im.ModuleName, frm->linear_pc - im.BaseOfImage);
+    else dbg_printf(" in %s (+0x%Ix)", im.ModuleName, frm->linear_pc - (DWORD_PTR)im.BaseOfImage);
 }
 
 /******************************************************************

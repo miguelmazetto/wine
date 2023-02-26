@@ -477,6 +477,7 @@ enum apc_type
     APC_USER,
     APC_ASYNC_IO,
     APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_ALLOC_EX,
     APC_VIRTUAL_FREE,
     APC_VIRTUAL_QUERY,
     APC_VIRTUAL_PROTECT,
@@ -518,6 +519,16 @@ typedef union
         mem_size_t       zero_bits;
         unsigned int     prot;
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     op_type;
+        client_ptr_t     addr;
+        mem_size_t       size;
+        mem_size_t       limit;
+        mem_size_t       align;
+        unsigned int     prot;
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;
@@ -613,6 +624,13 @@ typedef union
         client_ptr_t     addr;
         mem_size_t       size;
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        client_ptr_t     addr;
+        mem_size_t       size;
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;
@@ -2905,6 +2923,17 @@ struct set_serial_info_reply
 #define SERIALINFO_PENDING_WAIT  0x08
 
 
+struct cancel_sync_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    client_ptr_t iosb;
+};
+struct cancel_sync_reply
+{
+    struct reply_header __header;
+};
+
 
 struct register_async_request
 {
@@ -3044,10 +3073,10 @@ struct create_named_pipe_request
     unsigned int   access;
     unsigned int   options;
     unsigned int   sharing;
+    unsigned int   disposition;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
-    char __pad_36[4];
     timeout_t      timeout;
     unsigned int   flags;
     /* VARARG(objattr,object_attributes); */
@@ -3057,7 +3086,7 @@ struct create_named_pipe_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
-    char __pad_12[4];
+    int            created;
 };
 
 
@@ -5600,6 +5629,7 @@ enum request
     REQ_is_window_hung,
     REQ_get_serial_info,
     REQ_set_serial_info,
+    REQ_cancel_sync,
     REQ_register_async,
     REQ_cancel_async,
     REQ_get_async_result,
@@ -5884,6 +5914,7 @@ union generic_request
     struct is_window_hung_request is_window_hung_request;
     struct get_serial_info_request get_serial_info_request;
     struct set_serial_info_request set_serial_info_request;
+    struct cancel_sync_request cancel_sync_request;
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
     struct get_async_result_request get_async_result_request;
@@ -6166,6 +6197,7 @@ union generic_reply
     struct is_window_hung_reply is_window_hung_reply;
     struct get_serial_info_reply get_serial_info_reply;
     struct set_serial_info_reply set_serial_info_reply;
+    struct cancel_sync_reply cancel_sync_reply;
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
     struct get_async_result_reply get_async_result_reply;
@@ -6324,7 +6356,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 755
+#define SERVER_PROTOCOL_VERSION 760
 
 /* ### protocol_version end ### */
 

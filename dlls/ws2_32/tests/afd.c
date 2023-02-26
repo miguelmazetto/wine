@@ -569,13 +569,7 @@ static void test_poll(void)
 
         ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
         ok(ret == -1, "got %d\n", ret);
-        todo_wine ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        if (WSAGetLastError() == WSAECONNABORTED)
-        {
-            ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
-            ok(ret == -1, "got %d\n", ret);
-            ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        }
+        ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
 
         /* A subsequent poll call returns no events, or times out. However, this
          * can't be reliably tested, as e.g. Linux will fail the connection
@@ -1466,13 +1460,14 @@ static void test_recv(void)
             IOCTL_AFD_RECV, &params, sizeof(params) - 1, NULL, 0);
     ok(ret == STATUS_INVALID_PARAMETER, "got %#x\n", ret);
 
-    memset(&io, 0, sizeof(io));
+    io.Status = 0xdeadbeef;
+    io.Information = 0xdeadbeef;
     memset(buffer, 0xcc, sizeof(buffer));
     ret = NtDeviceIoControlFile((HANDLE)client, event, NULL, NULL, &io,
             IOCTL_AFD_RECV, &params, sizeof(params), NULL, 0);
     ok(ret == STATUS_PENDING, "got %#x\n", ret);
-    ok(!io.Status, "got status %#lx\n", io.Status);
-    ok(!io.Information, "got information %#Ix\n", io.Information);
+    ok(io.Status == 0xdeadbeef, "got status %#lx\n", io.Status);
+    ok(io.Information == 0xdeadbeef, "got information %#Ix\n", io.Information);
 
     /* These structures need not remain valid. */
     memset(&params, 0xcc, sizeof(params));

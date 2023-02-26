@@ -75,6 +75,7 @@ static BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
     wndclass.lpfnWndProc = ChildWndProc;
     wndclass.cbWndExtra = sizeof(HANDLE);
     wndclass.lpszClassName = szChildClass;
+    wndclass.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     RegisterClassExW(&wndclass);
 
     hMenuFrame = LoadMenuW(hInstance, MAKEINTRESOURCEW(IDR_REGEDIT_MENU));
@@ -132,8 +133,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
     HACCEL hAccel;
     BOOL is_wow64;
 
-    InitCommonControls();
-
     if (ProcessCmdLine(GetCommandLineW())) {
         return 0;
     }
@@ -160,6 +159,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
         else WINE_ERR( "failed to restart 64-bit %s, err %ld\n", wine_dbgstr_w(filename), GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
     }
+
+    InitCommonControls();
 
     /* Initialize global strings */
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, ARRAY_SIZE(szTitle));

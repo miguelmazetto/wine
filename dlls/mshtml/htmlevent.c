@@ -59,27 +59,34 @@ typedef enum {
     DISPATCH_LEGACY
 } dispatch_mode_t;
 
+/* Keep inherited event types after the inheritor (e.g. DragEvent->MouseEvent->UIEvent) */
 typedef enum {
     EVENT_TYPE_EVENT,
-    EVENT_TYPE_UIEVENT,
+    EVENT_TYPE_CUSTOM,
+    EVENT_TYPE_DRAG,
     EVENT_TYPE_KEYBOARD,
     EVENT_TYPE_MOUSE,
     EVENT_TYPE_FOCUS,
-    EVENT_TYPE_DRAG,
+    EVENT_TYPE_UIEVENT,
+    EVENT_TYPE_PAGETRANSITION,
     EVENT_TYPE_MESSAGE,
     EVENT_TYPE_PROGRESS,
+    EVENT_TYPE_STORAGE,
     EVENT_TYPE_CLIPBOARD
 } event_type_t;
 
 static const WCHAR *event_types[] = {
     L"Event",
-    L"UIEvent",
+    L"CustomEvent",
+    L"Event", /* FIXME */
     L"KeyboardEvent",
     L"MouseEvent",
     L"Event", /* FIXME */
+    L"UIEvent",
     L"Event", /* FIXME */
-    L"Event", /* We don't use Gecko's message events */
+    L"MessageEvent",
     L"ProgressEvent",
+    L"StorageEvent",
     L"Event"  /* FIXME */
 };
 
@@ -110,15 +117,19 @@ typedef struct {
 /* Keep these sorted case sensitively */
 static const event_info_t event_info[] = {
     {L"DOMContentLoaded",  EVENT_TYPE_EVENT,     0,
-        EVENT_DEFAULTLISTENER | EVENT_BUBBLES | EVENT_CANCELABLE},
+        EVENT_BUBBLES | EVENT_CANCELABLE},
     {L"abort",             EVENT_TYPE_EVENT,     DISPID_EVMETH_ONABORT,
         EVENT_BIND_TO_TARGET},
+    {L"afterprint",        EVENT_TYPE_EVENT,     DISPID_EVMETH_ONAFTERPRINT,
+        EVENT_DEFAULTLISTENER},
     {L"animationend",      EVENT_TYPE_EVENT,     DISPID_EVPROP_ONANIMATIONEND,
         EVENT_DEFAULTLISTENER | EVENT_BUBBLES},
     {L"animationstart",    EVENT_TYPE_EVENT,     DISPID_EVPROP_ONANIMATIONSTART,
         EVENT_DEFAULTLISTENER | EVENT_BUBBLES},
     {L"beforeactivate",    EVENT_TYPE_EVENT,     DISPID_EVMETH_ONBEFOREACTIVATE,
         EVENT_FIXME | EVENT_BUBBLES | EVENT_CANCELABLE},
+    {L"beforeprint",       EVENT_TYPE_EVENT,     DISPID_EVMETH_ONBEFOREPRINT,
+        EVENT_DEFAULTLISTENER},
     {L"beforeunload",      EVENT_TYPE_EVENT,     DISPID_EVMETH_ONBEFOREUNLOAD,
         EVENT_DEFAULTLISTENER | EVENT_CANCELABLE },
     {L"blur",              EVENT_TYPE_FOCUS,     DISPID_EVMETH_ONBLUR,
@@ -177,6 +188,10 @@ static const event_info_t event_info[] = {
         EVENT_FIXME},
     {L"msthumbnailclick",  EVENT_TYPE_MOUSE,     DISPID_EVPROP_ONMSTHUMBNAILCLICK,
         EVENT_FIXME},
+    {L"pagehide",          EVENT_TYPE_PAGETRANSITION, DISPID_EVPROP_ONPAGEHIDE,
+        0},
+    {L"pageshow",          EVENT_TYPE_PAGETRANSITION, DISPID_EVPROP_ONPAGESHOW,
+        0},
     {L"paste",             EVENT_TYPE_CLIPBOARD, DISPID_EVMETH_ONPASTE,
         EVENT_FIXME | EVENT_BUBBLES | EVENT_CANCELABLE},
     {L"progress",          EVENT_TYPE_PROGRESS,  DISPID_EVPROP_PROGRESS,
@@ -191,23 +206,28 @@ static const event_info_t event_info[] = {
         EVENT_FIXME},
     {L"selectstart",       EVENT_TYPE_EVENT,     DISPID_EVMETH_ONSELECTSTART,
         EVENT_FIXME | EVENT_BUBBLES | EVENT_CANCELABLE},
-    {L"storage",           EVENT_TYPE_EVENT,     DISPID_EVMETH_ONSTORAGE,
+    {L"storage",           EVENT_TYPE_STORAGE,   DISPID_EVMETH_ONSTORAGE,
         0},
-    {L"storagecommit",     EVENT_TYPE_EVENT,     DISPID_EVMETH_ONSTORAGECOMMIT,
+    {L"storagecommit",     EVENT_TYPE_STORAGE,   DISPID_EVMETH_ONSTORAGECOMMIT,
         0},
     {L"submit",            EVENT_TYPE_EVENT,     DISPID_EVMETH_ONSUBMIT,
         EVENT_DEFAULTLISTENER | EVENT_HASDEFAULTHANDLERS | EVENT_BUBBLES | EVENT_CANCELABLE},
     {L"timeout",           EVENT_TYPE_PROGRESS,  DISPID_EVPROP_TIMEOUT,
         EVENT_BIND_TO_TARGET},
     {L"unload",            EVENT_TYPE_UIEVENT,   DISPID_EVMETH_ONUNLOAD,
-        EVENT_FIXME}
+        EVENT_BIND_TO_TARGET},
+    {L"visibilitychange",  EVENT_TYPE_EVENT,     DISPID_EVPROP_VISIBILITYCHANGE,
+        EVENT_FIXME | EVENT_BUBBLES},
+
+    /* EVENTID_LAST special entry */
+    {NULL,                 EVENT_TYPE_EVENT,     0, 0}
 };
 
-C_ASSERT(ARRAY_SIZE(event_info) == EVENTID_LAST);
+C_ASSERT(ARRAY_SIZE(event_info) - 1 == EVENTID_LAST);
 
 static eventid_t str_to_eid(const WCHAR *str)
 {
-    unsigned i, a = 0, b = ARRAY_SIZE(event_info);
+    unsigned i, a = 0, b = ARRAY_SIZE(event_info) - 1;
     int c;
 
     while(a < b) {
@@ -223,7 +243,7 @@ static eventid_t str_to_eid(const WCHAR *str)
 
 static eventid_t attr_to_eid(const WCHAR *str)
 {
-    unsigned i, a = 0, b = ARRAY_SIZE(event_info);
+    unsigned i, a = 0, b = ARRAY_SIZE(event_info) - 1;
     int c;
 
     if((str[0] != 'o' && str[0] != 'O') || (str[1] != 'n' && str[1] != 'N'))
@@ -260,11 +280,11 @@ static listener_container_t *get_listener_container(EventTarget *event_target, c
         return NULL;
 
     eid = str_to_eid(type);
-    if(eid != EVENTID_LAST && (event_info[eid].flags & EVENT_FIXME))
+    if(event_info[eid].flags & EVENT_FIXME)
         FIXME("unimplemented event %s\n", debugstr_w(event_info[eid].name));
 
     type_len = lstrlenW(type);
-    container = heap_alloc(FIELD_OFFSET(listener_container_t, type[type_len+1]));
+    container = malloc(FIELD_OFFSET(listener_container_t, type[type_len+1]));
     if(!container)
         return NULL;
     memcpy(container->type, type, (type_len + 1) * sizeof(WCHAR));
@@ -292,7 +312,7 @@ static void remove_event_listener(EventTarget *event_target, const WCHAR *type_n
         if(listener->function == function && listener->type == type) {
             IDispatch_Release(listener->function);
             list_remove(&listener->entry);
-            heap_free(listener);
+            free(listener);
             break;
         }
     }
@@ -369,7 +389,7 @@ static ULONG WINAPI HTMLEventObj_Release(IHTMLEventObj *iface)
         if(This->event)
             IDOMEvent_Release(&This->event->IDOMEvent_iface);
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -868,7 +888,7 @@ static HTMLEventObj *alloc_event_obj(DOMEvent *event, compat_mode_t compat_mode)
 {
     HTMLEventObj *event_obj;
 
-    event_obj = heap_alloc_zero(sizeof(*event_obj));
+    event_obj = calloc(1, sizeof(*event_obj));
     if(!event_obj)
         return NULL;
 
@@ -952,8 +972,8 @@ static ULONG WINAPI DOMEvent_Release(IDOMEvent *iface)
             IEventTarget_Release(&This->target->IEventTarget_iface);
         nsIDOMEvent_Release(This->nsevent);
         release_dispex(&This->dispex);
-        heap_free(This->type);
-        heap_free(This);
+        free(This->type);
+        free(This);
     }
 
     return ref;
@@ -1100,8 +1120,8 @@ static HRESULT WINAPI DOMEvent_initEvent(IDOMEvent *iface, BSTR type, VARIANT_BO
         return S_OK;
     }
 
-    heap_free(This->type);
-    This->type = heap_strdupW(type);
+    free(This->type);
+    This->type = wcsdup(type);
     if(!This->type)
         return E_OUTOFMEMORY;
     This->event_id = str_to_eid(type);
@@ -1685,18 +1705,16 @@ static HRESULT WINAPI DOMMouseEvent_get_fromElement(IDOMMouseEvent *iface, IHTML
     DOMMouseEvent *This = impl_from_IDOMMouseEvent(iface);
     eventid_t event_id = This->ui_event.event.event_id;
     IEventTarget  *related_target = NULL;
+    HRESULT hres = S_OK;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(event_id != EVENTID_LAST) {
-        HRESULT hres = S_OK;
-        if(event_info[event_id].flags & EVENT_MOUSE_FROM_RELATED)
-            hres = IDOMMouseEvent_get_relatedTarget(&This->IDOMMouseEvent_iface, &related_target);
-        else if(event_info[event_id].flags & EVENT_MOUSE_TO_RELATED)
-            hres = IDOMEvent_get_target(&This->ui_event.event.IDOMEvent_iface, &related_target);
-        if(FAILED(hres))
-            return hres;
-    }
+    if(event_info[event_id].flags & EVENT_MOUSE_FROM_RELATED)
+        hres = IDOMMouseEvent_get_relatedTarget(&This->IDOMMouseEvent_iface, &related_target);
+    else if(event_info[event_id].flags & EVENT_MOUSE_TO_RELATED)
+        hres = IDOMEvent_get_target(&This->ui_event.event.IDOMEvent_iface, &related_target);
+    if(FAILED(hres))
+        return hres;
 
     if(!related_target) {
         *p = NULL;
@@ -1712,18 +1730,16 @@ static HRESULT WINAPI DOMMouseEvent_get_toElement(IDOMMouseEvent *iface, IHTMLEl
     DOMMouseEvent *This = impl_from_IDOMMouseEvent(iface);
     eventid_t event_id = This->ui_event.event.event_id;
     IEventTarget  *related_target = NULL;
+    HRESULT hres = S_OK;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(event_id != EVENTID_LAST) {
-        HRESULT hres = S_OK;
-        if(event_info[event_id].flags & EVENT_MOUSE_TO_RELATED)
-            hres = IDOMMouseEvent_get_relatedTarget(&This->IDOMMouseEvent_iface, &related_target);
-        else if(event_info[event_id].flags & EVENT_MOUSE_FROM_RELATED)
-            hres = IDOMEvent_get_target(&This->ui_event.event.IDOMEvent_iface, &related_target);
-        if(FAILED(hres))
-            return hres;
-    }
+    if(event_info[event_id].flags & EVENT_MOUSE_TO_RELATED)
+        hres = IDOMMouseEvent_get_relatedTarget(&This->IDOMMouseEvent_iface, &related_target);
+    else if(event_info[event_id].flags & EVENT_MOUSE_FROM_RELATED)
+        hres = IDOMEvent_get_target(&This->ui_event.event.IDOMEvent_iface, &related_target);
+    if(FAILED(hres))
+        return hres;
 
     if(!related_target) {
         *p = NULL;
@@ -2150,8 +2166,11 @@ static HRESULT WINAPI DOMKeyboardEvent_get_char(IDOMKeyboardEvent *iface, VARIAN
 static HRESULT WINAPI DOMKeyboardEvent_get_locale(IDOMKeyboardEvent *iface, BSTR *p)
 {
     DOMKeyboardEvent *This = impl_from_IDOMKeyboardEvent(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    FIXME("(%p)->(%p) semi-stub\n", This, p);
+
+    *p = SysAllocString(L"");
+    return *p ? S_OK : E_OUTOFMEMORY;
 }
 
 static const IDOMKeyboardEventVtbl DOMKeyboardEventVtbl = {
@@ -2198,6 +2217,98 @@ static void DOMKeyboardEvent_destroy(DOMEvent *event)
     DOMKeyboardEvent *This = DOMKeyboardEvent_from_DOMEvent(event);
     DOMUIEvent_destroy(&This->ui_event.event);
     nsIDOMKeyEvent_Release(This->nsevent);
+}
+
+typedef struct {
+    DOMEvent event;
+    IWinePageTransitionEvent IWinePageTransitionEvent_iface;
+} DOMPageTransitionEvent;
+
+static inline DOMPageTransitionEvent *impl_from_IWinePageTransitionEvent(IWinePageTransitionEvent *iface)
+{
+    return CONTAINING_RECORD(iface, DOMPageTransitionEvent, IWinePageTransitionEvent_iface);
+}
+
+static HRESULT WINAPI DOMPageTransitionEvent_QueryInterface(IWinePageTransitionEvent *iface, REFIID riid, void **ppv)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+    return IDOMEvent_QueryInterface(&This->event.IDOMEvent_iface, riid, ppv);
+}
+
+static ULONG WINAPI DOMPageTransitionEvent_AddRef(IWinePageTransitionEvent *iface)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+    return IDOMEvent_AddRef(&This->event.IDOMEvent_iface);
+}
+
+static ULONG WINAPI DOMPageTransitionEvent_Release(IWinePageTransitionEvent *iface)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+    return IDOMEvent_Release(&This->event.IDOMEvent_iface);
+}
+
+static HRESULT WINAPI DOMPageTransitionEvent_GetTypeInfoCount(IWinePageTransitionEvent *iface, UINT *pctinfo)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+    return IDispatchEx_GetTypeInfoCount(&This->event.dispex.IDispatchEx_iface, pctinfo);
+}
+
+static HRESULT WINAPI DOMPageTransitionEvent_GetTypeInfo(IWinePageTransitionEvent *iface, UINT iTInfo,
+                                                   LCID lcid, ITypeInfo **ppTInfo)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+    return IDispatchEx_GetTypeInfo(&This->event.dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
+}
+
+static HRESULT WINAPI DOMPageTransitionEvent_GetIDsOfNames(IWinePageTransitionEvent *iface, REFIID riid,
+        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+    return IDispatchEx_GetIDsOfNames(&This->event.dispex.IDispatchEx_iface, riid, rgszNames, cNames,
+            lcid, rgDispId);
+}
+
+static HRESULT WINAPI DOMPageTransitionEvent_Invoke(IWinePageTransitionEvent *iface, DISPID dispIdMember,
+        REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+        EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+    return IDispatchEx_Invoke(&This->event.dispex.IDispatchEx_iface, dispIdMember, riid, lcid,
+            wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI DOMPageTransitionEvent_get_persisted(IWinePageTransitionEvent *iface, VARIANT_BOOL *p)
+{
+    DOMPageTransitionEvent *This = impl_from_IWinePageTransitionEvent(iface);
+
+    FIXME("(%p)->(%p): always returning FALSE\n", This, p);
+
+    *p = VARIANT_FALSE;
+    return S_OK;
+}
+
+static const IWinePageTransitionEventVtbl DOMPageTransitionEventVtbl = {
+    DOMPageTransitionEvent_QueryInterface,
+    DOMPageTransitionEvent_AddRef,
+    DOMPageTransitionEvent_Release,
+    DOMPageTransitionEvent_GetTypeInfoCount,
+    DOMPageTransitionEvent_GetTypeInfo,
+    DOMPageTransitionEvent_GetIDsOfNames,
+    DOMPageTransitionEvent_Invoke,
+    DOMPageTransitionEvent_get_persisted
+};
+
+static DOMPageTransitionEvent *DOMPageTransitionEvent_from_DOMEvent(DOMEvent *event)
+{
+    return CONTAINING_RECORD(event, DOMPageTransitionEvent, event);
+}
+
+static void *DOMPageTransitionEvent_query_interface(DOMEvent *event, REFIID riid)
+{
+    DOMPageTransitionEvent *page_transition_event = DOMPageTransitionEvent_from_DOMEvent(event);
+    if(IsEqualGUID(&IID_IWinePageTransitionEvent, riid))
+        return &page_transition_event->IWinePageTransitionEvent_iface;
+    return NULL;
 }
 
 typedef struct {
@@ -2616,6 +2727,7 @@ typedef struct {
     BSTR key;
     BSTR old_value;
     BSTR new_value;
+    BSTR url;
 } DOMStorageEvent;
 
 static inline DOMStorageEvent *impl_from_IDOMStorageEvent(IDOMStorageEvent *iface)
@@ -2710,8 +2822,13 @@ static HRESULT WINAPI DOMStorageEvent_get_newValue(IDOMStorageEvent *iface, BSTR
 static HRESULT WINAPI DOMStorageEvent_get_url(IDOMStorageEvent *iface, BSTR *p)
 {
     DOMStorageEvent *This = impl_from_IDOMStorageEvent(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(This->url)
+        return (*p = SysAllocStringLen(This->url, SysStringLen(This->url))) ? S_OK : E_OUTOFMEMORY;
+    *p = NULL;
+    return S_OK;
 }
 
 static HRESULT WINAPI DOMStorageEvent_get_storageArea(IDOMStorageEvent *iface, IHTMLStorage **p)
@@ -2766,6 +2883,7 @@ static void DOMStorageEvent_destroy(DOMEvent *event)
     SysFreeString(storage_event->key);
     SysFreeString(storage_event->old_value);
     SysFreeString(storage_event->new_value);
+    SysFreeString(storage_event->url);
 }
 
 static const tid_t DOMEvent_iface_tids[] = {
@@ -2819,6 +2937,20 @@ static dispex_static_data_t DOMKeyboardEvent_dispex = {
     NULL,
     DispDOMKeyboardEvent_tid,
     DOMKeyboardEvent_iface_tids
+};
+
+static void DOMPageTransitionEvent_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    if(mode >= COMPAT_MODE_IE11)
+        dispex_info_add_interface(info, IWinePageTransitionEvent_tid, NULL);
+}
+
+dispex_static_data_t DOMPageTransitionEvent_dispex = {
+    L"PageTransitionEvent",
+    NULL,
+    DispDOMEvent_tid,
+    DOMEvent_iface_tids,
+    DOMPageTransitionEvent_init_dispex_info
 };
 
 static const tid_t DOMCustomEvent_iface_tids[] = {
@@ -2876,7 +3008,7 @@ dispex_static_data_t DOMStorageEvent_dispex = {
 static void *event_ctor(unsigned size, dispex_static_data_t *dispex_data, void *(*query_interface)(DOMEvent*,REFIID),
         void (*destroy)(DOMEvent*), nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
 {
-    DOMEvent *event = heap_alloc_zero(size);
+    DOMEvent *event = calloc(1, size);
 
     if(!event)
         return NULL;
@@ -2886,9 +3018,9 @@ static void *event_ctor(unsigned size, dispex_static_data_t *dispex_data, void *
     event->ref = 1;
     event->event_id = event_id;
     if(event_id != EVENTID_LAST) {
-        event->type = heap_strdupW(event_info[event_id].name);
+        event->type = wcsdup(event_info[event_id].name);
         if(!event->type) {
-            heap_free(event);
+            free(event);
             return NULL;
         }
         event->bubbles = (event_info[event_id].flags & EVENT_BUBBLES) != 0;
@@ -2906,6 +3038,11 @@ static void fill_parent_ui_event(nsIDOMEvent *nsevent, DOMUIEvent *ui_event)
 {
     ui_event->IDOMUIEvent_iface.lpVtbl = &DOMUIEventVtbl;
     nsIDOMEvent_QueryInterface(nsevent, &IID_nsIDOMUIEvent, (void**)&ui_event->nsevent);
+}
+
+static DOMEvent *generic_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
+{
+    return event_ctor(sizeof(DOMEvent), &DOMEvent_dispex, NULL, NULL, nsevent, event_id, compat_mode);
 }
 
 static DOMEvent *ui_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
@@ -2940,6 +3077,15 @@ static DOMEvent *keyboard_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_
     return &keyboard_event->ui_event.event;
 }
 
+static DOMEvent *page_transition_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
+{
+    DOMPageTransitionEvent *page_transition_event = event_ctor(sizeof(DOMCustomEvent), &DOMPageTransitionEvent_dispex,
+            DOMPageTransitionEvent_query_interface, NULL, nsevent, event_id, compat_mode);
+    if(!page_transition_event) return NULL;
+    page_transition_event->IWinePageTransitionEvent_iface.lpVtbl = &DOMPageTransitionEventVtbl;
+    return &page_transition_event->event;
+}
+
 static DOMEvent *custom_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
 {
     DOMCustomEvent *custom_event = event_ctor(sizeof(DOMCustomEvent), &DOMCustomEvent_dispex,
@@ -2965,7 +3111,7 @@ static DOMEvent *progress_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_
     return &progress_event->event;
 }
 
-static DOMEvent *message_event_ctor(nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
+static DOMEvent *message_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
 {
     DOMMessageEvent *message_event = event_ctor(sizeof(DOMMessageEvent), &DOMMessageEvent_dispex,
             DOMMessageEvent_query_interface, DOMMessageEvent_destroy, nsevent, event_id, compat_mode);
@@ -2974,7 +3120,7 @@ static DOMEvent *message_event_ctor(nsIDOMEvent *nsevent, eventid_t event_id, co
     return &message_event->event;
 }
 
-static DOMEvent *storage_event_ctor(nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
+static DOMEvent *storage_event_ctor(void *iface, nsIDOMEvent *nsevent, eventid_t event_id, compat_mode_t compat_mode)
 {
     DOMStorageEvent *storage_event = event_ctor(sizeof(DOMStorageEvent), &DOMStorageEvent_dispex,
             DOMStorageEvent_query_interface, DOMStorageEvent_destroy, nsevent, event_id, compat_mode);
@@ -2983,48 +3129,47 @@ static DOMEvent *storage_event_ctor(nsIDOMEvent *nsevent, eventid_t event_id, co
     return &storage_event->event;
 }
 
-static DOMEvent *alloc_event(nsIDOMEvent *nsevent, compat_mode_t compat_mode, eventid_t event_id)
+static const struct {
+    REFIID iid;
+    DOMEvent *(*ctor)(void *iface, nsIDOMEvent *nsevent, eventid_t, compat_mode_t);
+} event_types_ctor_table[] = {
+    [EVENT_TYPE_EVENT]          = { NULL,                         generic_event_ctor },
+    [EVENT_TYPE_UIEVENT]        = { &IID_nsIDOMUIEvent,           ui_event_ctor },
+    [EVENT_TYPE_MOUSE]          = { &IID_nsIDOMMouseEvent,        mouse_event_ctor },
+    [EVENT_TYPE_KEYBOARD]       = { &IID_nsIDOMKeyEvent,          keyboard_event_ctor },
+    [EVENT_TYPE_CLIPBOARD]      = { NULL,                         generic_event_ctor },
+    [EVENT_TYPE_FOCUS]          = { NULL,                         generic_event_ctor },
+    [EVENT_TYPE_DRAG]           = { NULL,                         generic_event_ctor },
+    [EVENT_TYPE_PAGETRANSITION] = { NULL,                         page_transition_event_ctor },
+    [EVENT_TYPE_CUSTOM]         = { &IID_nsIDOMCustomEvent,       custom_event_ctor },
+    [EVENT_TYPE_PROGRESS]       = { &IID_nsIDOMProgressEvent,     progress_event_ctor },
+    [EVENT_TYPE_MESSAGE]        = { NULL,                         message_event_ctor },
+    [EVENT_TYPE_STORAGE]        = { NULL,                         storage_event_ctor },
+};
+
+static DOMEvent *alloc_event(nsIDOMEvent *nsevent, compat_mode_t compat_mode, event_type_t event_type,
+        eventid_t event_id)
 {
-    static const struct {
-        REFIID iid;
-        DOMEvent *(*ctor)(void *iface, nsIDOMEvent *nsevent, eventid_t, compat_mode_t);
-    } types_table[] = {
-        { &IID_nsIDOMMouseEvent,        mouse_event_ctor },
-        { &IID_nsIDOMKeyEvent,          keyboard_event_ctor },
-        { &IID_nsIDOMUIEvent,           ui_event_ctor },
-        { &IID_nsIDOMCustomEvent,       custom_event_ctor },
-        { &IID_nsIDOMProgressEvent,     progress_event_ctor },
-    };
+    void *iface = NULL;
     DOMEvent *event;
-    unsigned i;
 
-    switch(event_id) {
-    case EVENTID_MESSAGE: return message_event_ctor(nsevent, event_id, compat_mode);
-    case EVENTID_STORAGECOMMIT:
-    case EVENTID_STORAGE: return storage_event_ctor(nsevent, event_id, compat_mode);
-    default: break;
-    }
+    if(event_types_ctor_table[event_type].iid)
+        nsIDOMEvent_QueryInterface(nsevent, event_types_ctor_table[event_type].iid, &iface);
 
-    for(i = 0; i < ARRAY_SIZE(types_table); i++) {
-        void *iface;
-        nsresult nsres = nsIDOMEvent_QueryInterface(nsevent, types_table[i].iid, &iface);
-        if(NS_SUCCEEDED(nsres)) {
-            /* Transfer the iface ownership to the ctor on success */
-            if(!(event = types_table[i].ctor(iface, nsevent, event_id, compat_mode)))
-                nsISupports_Release(iface);
-            return event;
-        }
-    }
-
-    return event_ctor(sizeof(DOMEvent), &DOMEvent_dispex, NULL, NULL, nsevent, event_id, compat_mode);
+    /* Transfer the iface ownership to the ctor on success */
+    if(!(event = event_types_ctor_table[event_type].ctor(iface, nsevent, event_id, compat_mode)) && iface)
+        nsISupports_Release(iface);
+    return event;
 }
 
 HRESULT create_event_from_nsevent(nsIDOMEvent *nsevent, compat_mode_t compat_mode, DOMEvent **ret_event)
 {
+    event_type_t event_type = EVENT_TYPE_EVENT;
     eventid_t event_id = EVENTID_LAST;
     DOMEvent *event;
     nsAString nsstr;
     nsresult nsres;
+    unsigned i;
 
     nsAString_Init(&nsstr, NULL);
     nsres = nsIDOMEvent_GetType(nsevent, &nsstr);
@@ -3039,7 +3184,17 @@ HRESULT create_event_from_nsevent(nsIDOMEvent *nsevent, compat_mode_t compat_mod
     }
     nsAString_Finish(&nsstr);
 
-    event = alloc_event(nsevent, compat_mode, event_id);
+    for(i = 0; i < ARRAY_SIZE(event_types_ctor_table); i++) {
+        void *iface;
+        if(event_types_ctor_table[i].iid &&
+           nsIDOMEvent_QueryInterface(nsevent, event_types_ctor_table[i].iid, &iface) == NS_OK) {
+            nsISupports_Release(iface);
+            event_type = i;
+            break;
+        }
+    }
+
+    event = alloc_event(nsevent, compat_mode, event_type, event_id);
     if(!event)
         return E_OUTOFMEMORY;
 
@@ -3050,20 +3205,30 @@ HRESULT create_event_from_nsevent(nsIDOMEvent *nsevent, compat_mode_t compat_mod
 
 HRESULT create_document_event_str(HTMLDocumentNode *doc, const WCHAR *type, IDOMEvent **ret_event)
 {
+    event_type_t event_type = EVENT_TYPE_EVENT;
     nsIDOMEvent *nsevent;
     DOMEvent *event;
     nsAString nsstr;
     nsresult nsres;
+    unsigned i;
 
     nsAString_InitDepend(&nsstr, type);
-    nsres = nsIDOMHTMLDocument_CreateEvent(doc->nsdoc, &nsstr, &nsevent);
+    nsres = nsIDOMDocument_CreateEvent(doc->dom_document, &nsstr, &nsevent);
     nsAString_Finish(&nsstr);
     if(NS_FAILED(nsres)) {
         FIXME("CreateEvent(%s) failed: %08lx\n", debugstr_w(type), nsres);
         return E_FAIL;
     }
 
-    event = alloc_event(nsevent, dispex_compat_mode(&doc->node.event_target.dispex), EVENTID_LAST);
+    for(i = 0; i < ARRAY_SIZE(event_types); i++) {
+        if(!wcsicmp(type, event_types[i])) {
+            event_type = i;
+            break;
+        }
+    }
+
+    event = alloc_event(nsevent, dispex_compat_mode(&doc->node.event_target.dispex),
+                        event_type, EVENTID_LAST);
     nsIDOMEvent_Release(nsevent);
     if(!event)
         return E_OUTOFMEMORY;
@@ -3080,14 +3245,14 @@ HRESULT create_document_event(HTMLDocumentNode *doc, eventid_t event_id, DOMEven
     nsresult nsres;
 
     nsAString_InitDepend(&nsstr, event_types[event_info[event_id].type]);
-    nsres = nsIDOMHTMLDocument_CreateEvent(doc->nsdoc, &nsstr, &nsevent);
+    nsres = nsIDOMDocument_CreateEvent(doc->dom_document, &nsstr, &nsevent);
     nsAString_Finish(&nsstr);
     if(NS_FAILED(nsres)) {
         FIXME("CreateEvent(%s) failed: %08lx\n", debugstr_w(event_types[event_info[event_id].type]), nsres);
         return E_FAIL;
     }
 
-    event = alloc_event(nsevent, doc->document_mode, event_id);
+    event = alloc_event(nsevent, doc->document_mode, event_info[event_id].type, event_id);
     if(!event)
         return E_OUTOFMEMORY;
 
@@ -3120,7 +3285,7 @@ HRESULT create_message_event(HTMLDocumentNode *doc, VARIANT *data, DOMEvent **re
 }
 
 HRESULT create_storage_event(HTMLDocumentNode *doc, BSTR key, BSTR old_value, BSTR new_value,
-        BOOL commit, DOMEvent **ret)
+        const WCHAR *url, BOOL commit, DOMEvent **ret)
 {
     DOMStorageEvent *storage_event;
     DOMEvent *event;
@@ -3138,6 +3303,11 @@ HRESULT create_storage_event(HTMLDocumentNode *doc, BSTR key, BSTR old_value, BS
             IDOMEvent_Release(&event->IDOMEvent_iface);
             return E_OUTOFMEMORY;
         }
+    }
+
+    if(url && !(storage_event->url = SysAllocString(url))) {
+        IDOMEvent_Release(&event->IDOMEvent_iface);
+        return E_OUTOFMEMORY;
     }
 
     *ret = event;
@@ -3297,12 +3467,12 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
             if(listeners_cnt == listeners_size) {
                 event_listener_t *new_listeners;
                 if(listeners == listeners_buf) {
-                    new_listeners = heap_alloc(listeners_size * 2 * sizeof(*new_listeners));
+                    new_listeners = malloc(listeners_size * 2 * sizeof(*new_listeners));
                     if(!new_listeners)
                         break;
                     memcpy(new_listeners, listeners, listeners_cnt * sizeof(*listeners));
                 }else {
-                    new_listeners = heap_realloc(listeners, listeners_size * 2 * sizeof(*new_listeners));
+                    new_listeners = realloc(listeners, listeners_size * 2 * sizeof(*new_listeners));
                 }
                 listeners = new_listeners;
                 listeners_size *= 2;
@@ -3377,11 +3547,10 @@ static void call_event_handlers(EventTarget *event_target, DOMEvent *event, disp
     for(listener = listeners; listener < listeners + listeners_cnt; listener++)
         IDispatch_Release(listener->function);
     if(listeners != listeners_buf)
-        heap_free(listeners);
+        free(listeners);
 
-    if(event->phase != DEP_CAPTURING_PHASE && event->event_id != EVENTID_LAST
-       && event_info[event->event_id].dispid && (vtbl = dispex_get_vtbl(&event_target->dispex))
-       && vtbl->get_cp_container)
+    if(event->phase != DEP_CAPTURING_PHASE && event_info[event->event_id].dispid
+       && (vtbl = dispex_get_vtbl(&event_target->dispex)) && vtbl->get_cp_container)
         cp_container = vtbl->get_cp_container(&event_target->dispex);
     if(cp_container) {
         if(cp_container->cps) {
@@ -3459,12 +3628,12 @@ static HRESULT dispatch_event_object(EventTarget *event_target, DOMEvent *event,
         if(chain_cnt == chain_buf_size) {
             EventTarget **new_chain;
             if(target_chain == target_chain_buf) {
-                new_chain = heap_alloc(chain_buf_size * 2 * sizeof(*new_chain));
+                new_chain = malloc(chain_buf_size * 2 * sizeof(*new_chain));
                 if(!new_chain)
                     break;
                 memcpy(new_chain, target_chain, chain_buf_size * sizeof(*new_chain));
             }else {
-                new_chain = heap_realloc(target_chain, chain_buf_size * 2 * sizeof(*new_chain));
+                new_chain = realloc(target_chain, chain_buf_size * 2 * sizeof(*new_chain));
                 if(!new_chain)
                     break;
             }
@@ -3514,12 +3683,15 @@ static HRESULT dispatch_event_object(EventTarget *event_target, DOMEvent *event,
         *r = variant_bool(!event->prevent_default);
 
     if(target_vtbl && target_vtbl->set_current_event) {
-        prev_event = target_vtbl->set_current_event(&event_target->dispex, prev_event);
-        if(prev_event)
-            IHTMLEventObj_Release(prev_event);
+        IHTMLEventObj *prev = target_vtbl->set_current_event(&event_target->dispex, prev_event);
+        if(prev)
+            IHTMLEventObj_Release(prev);
     }
 
-    if(event->event_id != EVENTID_LAST && (event_info[event->event_id].flags & EVENT_HASDEFAULTHANDLERS)) {
+    if(prev_event)
+        IHTMLEventObj_Release(prev_event);
+
+    if(event_info[event->event_id].flags & EVENT_HASDEFAULTHANDLERS) {
         BOOL prevent_default = event->prevent_default;
         for(i = 0; !prevent_default && i < chain_cnt; i++) {
             vtbl = dispex_get_vtbl(&target_chain[i]->dispex);
@@ -3543,7 +3715,7 @@ static HRESULT dispatch_event_object(EventTarget *event_target, DOMEvent *event,
     for(i = 0; i < chain_cnt; i++)
         IEventTarget_Release(&target_chain[i]->IEventTarget_iface);
     if(target_chain != target_chain_buf)
-        heap_free(target_chain);
+        free(target_chain);
 
     return S_OK;
 }
@@ -3557,7 +3729,7 @@ void dispatch_event(EventTarget *event_target, DOMEvent *event)
      * but we already dispatched event to all relevant targets. Stop event
      * propagation here to avoid events being dispatched multiple times.
      */
-    if(event->event_id != EVENTID_LAST && (event_info[event->event_id].flags & EVENT_BIND_TO_TARGET))
+    if(event_info[event->event_id].flags & EVENT_BIND_TO_TARGET)
         nsIDOMEvent_StopPropagation(event->nsevent);
 }
 
@@ -3624,7 +3796,7 @@ HRESULT ensure_doc_nsevent_handler(HTMLDocumentNode *doc, nsIDOMNode *nsnode, ev
 {
     TRACE("%s\n", debugstr_w(event_info[eid].name));
 
-    if(!doc->nsdoc)
+    if(!doc->dom_document)
         return S_OK;
 
     switch(eid) {
@@ -3636,18 +3808,13 @@ HRESULT ensure_doc_nsevent_handler(HTMLDocumentNode *doc, nsIDOMNode *nsnode, ev
         doc->event_vector[eid] = TRUE;
         eid = EVENTID_BLUR;
         break;
-    case EVENTID_LAST:
-        return S_OK;
     default:
         break;
     }
 
     if(event_info[eid].flags & EVENT_DEFAULTLISTENER) {
         nsnode = NULL;
-    }else if(event_info[eid].flags & EVENT_BIND_TO_TARGET) {
-        if(!nsnode)
-            nsnode = doc->node.nsnode;
-    }else {
+    }else if(!(event_info[eid].flags & EVENT_BIND_TO_TARGET)) {
         return S_OK;
     }
 
@@ -3703,7 +3870,7 @@ static event_listener_t *get_onevent_listener(EventTarget *event_target, eventid
     if(!alloc)
         return NULL;
 
-    listener = heap_alloc(sizeof(*listener));
+    listener = malloc(sizeof(*listener));
     if(!listener)
         return NULL;
 
@@ -3832,6 +3999,11 @@ HRESULT attach_event(EventTarget *event_target, BSTR name, IDispatch *disp, VARI
     event_listener_t *listener;
     eventid_t eid;
 
+    if(!disp) {
+        *res = VARIANT_FALSE;
+        return S_OK;
+    }
+
     eid = attr_to_eid(name);
     if(eid == EVENTID_LAST) {
         WARN("Unknown event\n");
@@ -3843,7 +4015,7 @@ HRESULT attach_event(EventTarget *event_target, BSTR name, IDispatch *disp, VARI
     if(!container)
         return E_OUTOFMEMORY;
 
-    listener = heap_alloc(sizeof(*listener));
+    listener = malloc(sizeof(*listener));
     if(!listener)
         return E_OUTOFMEMORY;
 
@@ -3982,7 +4154,7 @@ HRESULT doc_init_events(HTMLDocumentNode *doc)
     unsigned i;
     HRESULT hres;
 
-    doc->event_vector = heap_alloc_zero(EVENTID_LAST*sizeof(BOOL));
+    doc->event_vector = calloc(EVENTID_LAST, sizeof(BOOL));
     if(!doc->event_vector)
         return E_OUTOFMEMORY;
 
@@ -4062,6 +4234,9 @@ static HRESULT WINAPI EventTarget_addEventListener(IEventTarget *iface, BSTR typ
 
     TRACE("(%p)->(%s %p %x)\n", This, debugstr_w(type), function, capture);
 
+    if(!function)
+        return S_OK;
+
     container = get_listener_container(This, type, TRUE);
     if(!container)
         return E_OUTOFMEMORY;
@@ -4072,7 +4247,7 @@ static HRESULT WINAPI EventTarget_addEventListener(IEventTarget *iface, BSTR typ
             return S_OK;
     }
 
-    listener = heap_alloc(sizeof(*listener));
+    listener = malloc(sizeof(*listener));
     if(!listener)
         return E_OUTOFMEMORY;
 
@@ -4240,8 +4415,8 @@ void release_event_target(EventTarget *event_target)
             if(listener->function)
                 IDispatch_Release(listener->function);
             list_remove(&listener->entry);
-            heap_free(listener);
+            free(listener);
         }
-        heap_free(iter);
+        free(iter);
     }
 }

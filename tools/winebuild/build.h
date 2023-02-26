@@ -23,10 +23,6 @@
 #ifndef __WINE_BUILD_H
 #define __WINE_BUILD_H
 
-#ifndef __WINE_CONFIG_H
-# error You must include config.h to use this header
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 #include "../tools.h"
@@ -252,14 +248,14 @@ extern void output_cfi( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
 extern void output_rva( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
+extern void output_thunk_rva( int ordinal, const char *format, ... )
+   __attribute__ ((__format__ (__printf__, 2, 3)));
 extern void spawn( struct strarray array );
 extern struct strarray find_tool( const char *name, const char * const *names );
 extern struct strarray find_link_tool(void);
 extern struct strarray get_as_command(void);
 extern struct strarray get_ld_command(void);
 extern const char *get_nm_command(void);
-extern void cleanup_tmp_files(void);
-extern char *get_temp_file_name( const char *prefix, const char *suffix );
 extern void output_standard_file_header(void);
 extern FILE *open_input_file( const char *srcdir, const char *name );
 extern void close_input_file( FILE *file );
@@ -273,6 +269,7 @@ extern DLLSPEC *alloc_dll_spec(void);
 extern void free_dll_spec( DLLSPEC *spec );
 extern char *make_c_identifier( const char *str );
 extern const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec );
+extern const char *get_abi_name( const ORDDEF *odp, const char *name );
 extern const char *get_link_name( const ORDDEF *odp );
 extern int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const void *) );
 extern unsigned int get_alignment(unsigned int align);
@@ -300,12 +297,14 @@ extern void read_undef_symbols( DLLSPEC *spec, struct strarray files );
 extern void resolve_imports( DLLSPEC *spec );
 extern int is_undefined( const char *name );
 extern int has_imports(void);
+extern int has_delay_imports(void);
 extern void output_get_pc_thunk(void);
 extern void output_module( DLLSPEC *spec );
 extern void output_stubs( DLLSPEC *spec );
 extern void output_syscalls( DLLSPEC *spec );
 extern void output_imports( DLLSPEC *spec );
-extern void output_static_lib( DLLSPEC *spec, struct strarray files );
+extern void output_import_lib( DLLSPEC *spec, struct strarray files );
+extern void output_static_lib( const char *output_name, struct strarray files, int create );
 extern void output_exports( DLLSPEC *spec );
 extern int load_res32_file( const char *name, DLLSPEC *spec );
 extern void output_resources( DLLSPEC *spec );
@@ -356,8 +355,8 @@ extern int verbose;
 extern int link_ext_symbols;
 extern int force_pointer_size;
 extern int unwind_tables;
+extern int use_dlltool;
 extern int use_msvcrt;
-extern int unix_lib;
 extern int safe_seh;
 extern int prefer_native;
 extern int data_only;

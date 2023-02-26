@@ -43,7 +43,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(macdrv);
 static pthread_mutex_t win_data_mutex;
 static CFMutableDictionaryRef win_datas;
 
-static DWORD activate_on_focus_time;
+static unsigned int activate_on_focus_time;
 
 
 /***********************************************************************
@@ -129,10 +129,10 @@ static void get_cocoa_window_state(struct macdrv_win_data *data,
  *
  * Helper for macdrv_window_to_mac_rect and macdrv_mac_to_window_rect.
  */
-static void get_mac_rect_offset(struct macdrv_win_data *data, DWORD style, RECT *rect,
+static void get_mac_rect_offset(struct macdrv_win_data *data, unsigned int style, RECT *rect,
                                 const RECT *window_rect, const RECT *client_rect)
 {
-    DWORD ex_style, style_mask = 0, ex_style_mask = 0;
+    unsigned int ex_style, style_mask = 0, ex_style_mask = 0;
 
     rect->top = rect->bottom = rect->left = rect->right = 0;
 
@@ -1309,7 +1309,7 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
 {
     MSG msg;
     RECT origRect, movedRect, desktopRect;
-    LONG hittest = (LONG)(wparam & 0x0f);
+    int hittest = (int)(wparam & 0x0f);
     POINT capturePoint;
     LONG style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
     BOOL moved = FALSE;
@@ -1325,7 +1325,7 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
     capturePoint.y = (short)HIWORD(dwPoint);
     NtUserClipCursor(NULL);
 
-    TRACE("hwnd %p hittest %d, pos %d,%d\n", hwnd, hittest, capturePoint.x, capturePoint.y);
+    TRACE("hwnd %p hittest %d, pos %d,%d\n", hwnd, hittest, (int)capturePoint.x, (int)capturePoint.y);
 
     origRect.left = origRect.right = origRect.top = origRect.bottom = 0;
     if (AdjustWindowRectEx(&origRect, style, FALSE, NtUserGetWindowLongW(hwnd, GWL_EXSTYLE)))
@@ -1486,9 +1486,9 @@ static LRESULT move_window(HWND hwnd, WPARAM wparam)
 /***********************************************************************
  *              perform_window_command
  */
-static void perform_window_command(HWND hwnd, DWORD style_any, DWORD style_none, WORD command, WORD hittest)
+static void perform_window_command(HWND hwnd, unsigned int style_any, unsigned int style_none, WORD command, WORD hittest)
 {
-    DWORD style;
+    unsigned int style;
 
     TRACE("win %p style_any 0x%08x style_none 0x%08x command 0x%04x hittest 0x%04x\n",
           hwnd, style_any, style_none, command, hittest);
@@ -1570,6 +1570,26 @@ BOOL macdrv_CreateDesktopWindow(HWND hwnd)
     return TRUE;
 }
 
+void macdrv_resize_desktop(void)
+{
+    HWND hwnd = NtUserGetDesktopWindow();
+    CGRect new_desktop_rect;
+    RECT current_desktop_rect;
+
+    macdrv_reset_device_metrics();
+    new_desktop_rect = macdrv_get_desktop_rect();
+    if (!NtUserGetWindowRect(hwnd, &current_desktop_rect) ||
+        !CGRectEqualToRect(cgrect_from_rect(current_desktop_rect), new_desktop_rect))
+    {
+        send_message_timeout(HWND_BROADCAST, WM_MACDRV_RESET_DEVICE_METRICS, 0, 0,
+                             SMTO_ABORTIFHUNG, 2000, NULL);
+        NtUserSetWindowPos(hwnd, 0, CGRectGetMinX(new_desktop_rect), CGRectGetMinY(new_desktop_rect),
+                           CGRectGetWidth(new_desktop_rect), CGRectGetHeight(new_desktop_rect),
+                           SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE);
+        send_message_timeout(HWND_BROADCAST, WM_MACDRV_DISPLAYCHANGE, 0, 0,
+                             SMTO_ABORTIFHUNG, 2000, NULL);
+    }
+}
 
 #define WM_WINE_NOTIFY_ACTIVITY WM_USER
 
@@ -1591,6 +1611,9 @@ LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 #pragma clang diagnostic pop
         break;
     }
+    case WM_DISPLAYCHANGE:
+        macdrv_resize_desktop();
+        break;
     }
     return NtUserMessageCall(hwnd, msg, wp, lp, 0, NtUserDefWindowProc, FALSE);
 }
@@ -1645,7 +1668,7 @@ void macdrv_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWOR
 {
     struct macdrv_win_data *data = get_win_data(hwnd);
 
-    TRACE("hwnd %p key %#08x alpha %#02x flags %x\n", hwnd, key, alpha, flags);
+    TRACE("hwnd %p key %#08x alpha %#02x flags %x\n", hwnd, (unsigned int)key, alpha, (unsigned int)flags);
 
     if (data)
     {
@@ -1734,7 +1757,7 @@ void macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
 {
     struct macdrv_win_data *data;
 
-    TRACE("hwnd %p offset %d styleOld 0x%08x styleNew 0x%08x\n", hwnd, offset, style->styleOld, style->styleNew);
+    TRACE("hwnd %p offset %d styleOld 0x%08x styleNew 0x%08x\n", hwnd, offset, (unsigned int)style->styleOld, (unsigned int)style->styleNew);
 
     if (hwnd == NtUserGetDesktopWindow()) return;
     if (!(data = get_win_data(hwnd))) return;
@@ -1842,7 +1865,7 @@ LRESULT macdrv_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
         !NtUserGetWindowLongPtrW(hwnd, GWLP_ID) &&
         (NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_SYSMENU))
     {
-        TRACE("ignoring SC_KEYMENU wp %lx lp %lx\n", wparam, lparam);
+        TRACE("ignoring SC_KEYMENU wp %lx lp %lx\n", (unsigned long)wparam, lparam);
         ret = 0;
     }
 
@@ -1987,27 +2010,6 @@ LRESULT macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             release_win_data(data);
         }
         return 0;
-    case WM_MACDRV_UPDATE_DESKTOP_RECT:
-        if (hwnd == NtUserGetDesktopWindow())
-        {
-            CGRect new_desktop_rect;
-            RECT current_desktop_rect;
-
-            macdrv_reset_device_metrics();
-            new_desktop_rect = macdrv_get_desktop_rect();
-            if (!NtUserGetWindowRect(hwnd, &current_desktop_rect) ||
-                !CGRectEqualToRect(cgrect_from_rect(current_desktop_rect), new_desktop_rect))
-            {
-                send_message_timeout(HWND_BROADCAST, WM_MACDRV_RESET_DEVICE_METRICS, 0, 0,
-                                     SMTO_ABORTIFHUNG, 2000, NULL);
-                NtUserSetWindowPos(hwnd, 0, CGRectGetMinX(new_desktop_rect), CGRectGetMinY(new_desktop_rect),
-                                   CGRectGetWidth(new_desktop_rect), CGRectGetHeight(new_desktop_rect),
-                                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE);
-                send_message_timeout(HWND_BROADCAST, WM_MACDRV_DISPLAYCHANGE, 0, 0,
-                                     SMTO_ABORTIFHUNG, 2000, NULL);
-            }
-        }
-        return 0;
     case WM_MACDRV_RESET_DEVICE_METRICS:
         macdrv_reset_device_metrics();
         return 0;
@@ -2020,7 +2022,7 @@ LRESULT macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
 
-    FIXME("unrecognized window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp);
+    FIXME("unrecognized window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (unsigned long)wp, lp);
     return 0;
 }
 
@@ -2102,7 +2104,7 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
 {
     struct macdrv_thread_data *thread_data;
     struct macdrv_win_data *data;
-    DWORD new_style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
+    unsigned int new_style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
     RECT old_window_rect, old_whole_rect, old_client_rect;
 
     if (!(data = get_win_data(hwnd))) return;
@@ -2296,16 +2298,16 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
     if (data->window_rect.left == rect.left && data->window_rect.top == rect.top)
         flags |= SWP_NOMOVE;
     else
-        TRACE("%p moving from (%d,%d) to (%d,%d)\n", hwnd, data->window_rect.left,
-              data->window_rect.top, rect.left, rect.top);
+        TRACE("%p moving from (%d,%d) to (%d,%d)\n", hwnd, (int)data->window_rect.left,
+              (int)data->window_rect.top, (int)rect.left, (int)rect.top);
 
     if ((data->window_rect.right - data->window_rect.left == width &&
          data->window_rect.bottom - data->window_rect.top == height) ||
         (IsRectEmpty(&data->window_rect) && width == 1 && height == 1))
         flags |= SWP_NOSIZE;
     else
-        TRACE("%p resizing from (%dx%d) to (%dx%d)\n", hwnd, data->window_rect.right - data->window_rect.left,
-              data->window_rect.bottom - data->window_rect.top, width, height);
+        TRACE("%p resizing from (%dx%d) to (%dx%d)\n", hwnd, (int)(data->window_rect.right - data->window_rect.left),
+              (int)(data->window_rect.bottom - data->window_rect.top), width, height);
 
     being_dragged = data->drag_event != NULL;
     release_win_data(data);
@@ -2331,7 +2333,7 @@ void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
  */
 void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event)
 {
-    LONG style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
+    unsigned int style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
 
     if (!hwnd) return;
 
@@ -2453,7 +2455,7 @@ void macdrv_window_did_minimize(HWND hwnd)
 void macdrv_window_did_unminimize(HWND hwnd)
 {
     struct macdrv_win_data *data;
-    DWORD style;
+    unsigned int style;
 
     TRACE("win %p\n", hwnd);
 

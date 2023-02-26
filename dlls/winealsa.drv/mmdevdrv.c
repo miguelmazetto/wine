@@ -28,9 +28,9 @@
 #include "winreg.h"
 #include "winternl.h"
 #include "propsys.h"
+#include "propkey.h"
 #include "initguid.h"
 #include "ole2.h"
-#include "propkey.h"
 #include "mmdeviceapi.h"
 #include "devpkey.h"
 #include "mmsystem.h"
@@ -47,8 +47,6 @@
 #include "unixlib.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(alsa);
-
-unixlib_handle_t alsa_handle = 0;
 
 #define NULL_PTR_ERR MAKE_HRESULT(SEVERITY_ERROR, FACILITY_WIN32, RPC_X_NULL_REF_POINTER)
 
@@ -203,9 +201,7 @@ BOOL WINAPI DllMain(HINSTANCE dll, DWORD reason, void *reserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-        if(NtQueryVirtualMemory(GetCurrentProcess(), dll, MemoryWineUnixFuncs,
-                                &alsa_handle, sizeof(alsa_handle), NULL))
-            return FALSE;
+        if(__wine_init_unix_call()) return FALSE;
         break;
 
     case DLL_PROCESS_DETACH:
@@ -237,6 +233,8 @@ static DWORD WINAPI alsa_timer_thread(void *user)
 {
     struct timer_loop_params params;
     struct ACImpl *This = user;
+
+    SetThreadDescription(GetCurrentThread(), L"winealsa_timer");
 
     params.stream = This->stream;
 

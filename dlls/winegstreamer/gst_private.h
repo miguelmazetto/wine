@@ -33,7 +33,6 @@
 #define NONAMELESSUNION
 #include "dshow.h"
 #include "mfidl.h"
-#include "wmsdk.h"
 #include "wine/debug.h"
 #include "wine/strmbase.h"
 
@@ -86,7 +85,8 @@ void wg_parser_stream_get_preferred_format(struct wg_parser_stream *stream, stru
 void wg_parser_stream_enable(struct wg_parser_stream *stream, const struct wg_format *format);
 void wg_parser_stream_disable(struct wg_parser_stream *stream);
 
-bool wg_parser_stream_get_buffer(struct wg_parser_stream *stream, struct wg_parser_buffer *buffer);
+bool wg_parser_stream_get_buffer(struct wg_parser *parser, struct wg_parser_stream *stream,
+        struct wg_parser_buffer *buffer);
 bool wg_parser_stream_copy_buffer(struct wg_parser_stream *stream,
         void *data, uint32_t offset, uint32_t size);
 void wg_parser_stream_release_buffer(struct wg_parser_stream *stream);
@@ -95,6 +95,7 @@ void wg_parser_stream_notify_qos(struct wg_parser_stream *stream,
 
 /* Returns the duration in 100-nanosecond units. */
 uint64_t wg_parser_stream_get_duration(struct wg_parser_stream *stream);
+char *wg_parser_stream_get_tag(struct wg_parser_stream *stream, enum wg_parser_tag tag);
 /* start_pos and stop_pos are in 100-nanosecond units. */
 void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
         uint64_t start_pos, uint64_t stop_pos, DWORD start_flags, DWORD stop_flags);
@@ -103,15 +104,18 @@ struct wg_transform *wg_transform_create(const struct wg_format *input_format,
         const struct wg_format *output_format);
 void wg_transform_destroy(struct wg_transform *transform);
 bool wg_transform_set_output_format(struct wg_transform *transform, struct wg_format *format);
+bool wg_transform_get_status(struct wg_transform *transform, bool *accepts_input);
 
 unsigned int wg_format_get_max_size(const struct wg_format *format);
 
 HRESULT avi_splitter_create(IUnknown *outer, IUnknown **out);
 HRESULT decodebin_parser_create(IUnknown *outer, IUnknown **out);
 HRESULT mpeg_audio_codec_create(IUnknown *outer, IUnknown **out);
+HRESULT mpeg_layer3_decoder_create(IUnknown *outer, IUnknown **out);
 HRESULT mpeg_splitter_create(IUnknown *outer, IUnknown **out);
 HRESULT wave_parser_create(IUnknown *outer, IUnknown **out);
 HRESULT wma_decoder_create(IUnknown *outer, IUnknown **out);
+HRESULT wmv_decoder_create(IUnknown *outer, IUnknown **out);
 HRESULT resampler_create(IUnknown *outer, IUnknown **out);
 HRESULT color_convert_create(IUnknown *outer, IUnknown **out);
 
@@ -134,76 +138,16 @@ HRESULT wg_transform_push_mf(struct wg_transform *transform, IMFSample *sample,
         struct wg_sample_queue *queue);
 HRESULT wg_transform_push_quartz(struct wg_transform *transform, struct wg_sample *sample,
         struct wg_sample_queue *queue);
-HRESULT wg_transform_read_mf(struct wg_transform *transform, struct wg_sample *sample,
-        struct wg_format *format, DWORD *flags);
+HRESULT wg_transform_read_mf(struct wg_transform *transform, IMFSample *sample,
+        DWORD sample_size, struct wg_format *format, DWORD *flags);
 HRESULT wg_transform_read_quartz(struct wg_transform *transform, struct wg_sample *sample);
 
 HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj);
 
+HRESULT aac_decoder_create(REFIID riid, void **ret);
 HRESULT h264_decoder_create(REFIID riid, void **ret);
 HRESULT video_processor_create(REFIID riid, void **ret);
 
-struct wm_stream
-{
-    struct wm_reader *reader;
-    struct wg_parser_stream *wg_stream;
-    struct wg_format format;
-    WMT_STREAM_SELECTION selection;
-    WORD index;
-    bool eos;
-    bool allocate_output;
-    bool allocate_stream;
-    /* Note that we only pretend to read compressed samples, and instead output
-     * uncompressed samples regardless of whether we are configured to read
-     * compressed samples. Rather, the behaviour of the reader objects differs
-     * in nontrivial ways depending on this field. */
-    bool read_compressed;
-};
-
-struct wm_reader
-{
-    IUnknown IUnknown_inner;
-    IWMSyncReader2 IWMSyncReader2_iface;
-    IWMHeaderInfo3 IWMHeaderInfo3_iface;
-    IWMLanguageList IWMLanguageList_iface;
-    IWMPacketSize2 IWMPacketSize2_iface;
-    IWMProfile3 IWMProfile3_iface;
-    IWMReaderPlaylistBurn IWMReaderPlaylistBurn_iface;
-    IWMReaderTimecode IWMReaderTimecode_iface;
-    IUnknown *outer;
-    LONG refcount;
-
-    CRITICAL_SECTION cs;
-    QWORD start_time;
-
-    IStream *source_stream;
-    HANDLE file;
-    HANDLE read_thread;
-    bool read_thread_shutdown;
-    struct wg_parser *wg_parser;
-
-    struct wm_stream *streams;
-    WORD stream_count;
-};
-
-HRESULT WINAPI winegstreamer_create_wm_sync_reader(IUnknown *outer, void **out);
-struct wm_reader *wm_reader_from_sync_reader_inner(IUnknown *inner);
-
-HRESULT wm_reader_get_max_stream_size(struct wm_reader *reader, WORD stream_number, DWORD *size);
-HRESULT wm_reader_get_output_format(struct wm_reader *reader, DWORD output,
-        DWORD index, IWMOutputMediaProps **props);
-HRESULT wm_reader_get_output_format_count(struct wm_reader *reader, DWORD output, DWORD *count);
-HRESULT wm_reader_get_output_props(struct wm_reader *reader, DWORD output,
-        IWMOutputMediaProps **props);
-HRESULT wm_reader_get_stream_sample(struct wm_reader *reader, IWMReaderCallbackAdvanced *callback_advanced, WORD stream_number,
-        INSSBuffer **ret_sample, QWORD *pts, QWORD *duration, DWORD *flags, WORD *ret_stream_number);
-HRESULT wm_reader_get_stream_selection(struct wm_reader *reader,
-        WORD stream_number, WMT_STREAM_SELECTION *selection);
-HRESULT wm_reader_set_allocate_for_output(struct wm_reader *reader, DWORD output, BOOL allocate);
-HRESULT wm_reader_set_allocate_for_stream(struct wm_reader *reader, WORD stream_number, BOOL allocate);
-HRESULT wm_reader_set_output_props(struct wm_reader *reader, DWORD output,
-        IWMOutputMediaProps *props);
-HRESULT wm_reader_set_streams_selected(struct wm_reader *reader, WORD count,
-        const WORD *stream_numbers, const WMT_STREAM_SELECTION *selections);
+extern const GUID MFAudioFormat_RAW_AAC;
 
 #endif /* __GST_PRIVATE_INCLUDED__ */

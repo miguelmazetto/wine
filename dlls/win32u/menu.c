@@ -68,7 +68,7 @@ struct menu
     UINT        nTotalHeight;   /* total height of menu items inside menu */
     RECT        items_rect;     /* rectangle within which the items lie, excludes margins and scroll arrows */
     LONG        refcount;
-    DWORD       dwStyle;        /* extended menu style */
+    UINT        dwStyle;        /* extended menu style */
     UINT        cyMax;          /* max height of the whole menu, 0 is screen height */
     HBRUSH      hbrBack;        /* brush for menu background */
     DWORD       dwContextHelpID;
@@ -246,7 +246,7 @@ static const char *debugstr_menuitem( const struct menu_item *item )
 
     if (!item) return "NULL";
 
-    sprintf( buf, "{ ID=0x%lx", item->wID );
+    sprintf( buf, "{ ID=0x%lx", (long)item->wID );
     if (item->hSubMenu) sprintf( buf + strlen(buf), ", Sub=%p", item->hSubMenu );
 
     flags = item->fType;
@@ -1415,7 +1415,7 @@ BOOL WINAPI NtUserSetMenuContextHelpId( HMENU handle, DWORD id )
 {
     struct menu *menu;
 
-    TRACE( "(%p 0x%08x)\n", handle, id );
+    TRACE( "(%p 0x%08x)\n", handle, (int)id );
 
     if (!(menu = grab_menu_ptr( handle ))) return FALSE;
     menu->dwContextHelpID = id;
@@ -1705,8 +1705,8 @@ static BOOL translate_accelerator( HWND hwnd, UINT message, WPARAM wparam, LPARA
     {
         if (virt & FVIRTKEY)
         {
-            TRACE_(accel)( "found accel for virt_key %04lx (scan %04x)\n",
-                           wparam, 0xff & HIWORD(lparam) );
+            TRACE_(accel)( "found accel for virt_key %04x (scan %04x)\n",
+                           key, 0xff & HIWORD(lparam) );
 
             if (mask == (virt & (FSHIFT | FCONTROL | FALT))) goto found;
             TRACE_(accel)( ", but incorrect SHIFT/CTRL/ALT-state\n" );
@@ -1861,7 +1861,7 @@ INT WINAPI NtUserTranslateAccelerator( HWND hwnd, HACCEL accel, MSG *msg )
         return 0;
 
     TRACE_(accel)("accel %p, hwnd %p, msg->hwnd %p, msg->message %04x, wParam %08lx, lParam %08lx\n",
-                  accel,hwnd,msg->hwnd,msg->message,msg->wParam,msg->lParam);
+                  accel, hwnd, msg->hwnd, msg->message, (long)msg->wParam, msg->lParam);
 
     if (!(count = NtUserCopyAcceleratorTable( accel, NULL, 0 ))) return 0;
     if (count > ARRAY_SIZE( data ))
@@ -1994,7 +1994,9 @@ static void calc_menu_item_size( HDC hdc, struct menu_item *item, HWND owner, IN
 
     if (!menucharsize.cx)
     {
-        menucharsize.cx = get_char_dimensions( hdc, NULL, &menucharsize.cy );
+        int height;
+        menucharsize.cx = get_char_dimensions( hdc, NULL, &height );
+        menucharsize.cy = height;
         /* Win95/98/ME will use menucharsize.cy here. Testing is possible
          * but it is unlikely an application will depend on that */
         od_item_height = HIWORD( get_dialog_base_units() );
@@ -2024,8 +2026,8 @@ static void calc_menu_item_size( HDC hdc, struct menu_item *item, HWND owner, IN
         else
             item->rect.bottom += mis.itemHeight;
 
-        TRACE( "id=%04lx size=%dx%d\n", item->wID, item->rect.right-item->rect.left,
-               item->rect.bottom-item->rect.top );
+        TRACE( "id=%04lx size=%dx%d\n", (long)item->wID, (int)(item->rect.right - item->rect.left),
+               (int)(item->rect.bottom - item->rect.top) );
         return;
     }
 
@@ -2221,7 +2223,7 @@ static void draw_popup_arrow( HDC hdc, RECT rect, UINT arrow_width, UINT arrow_h
     NtGdiDeleteObjectApp( mem_hdc );
 }
 
-static void draw_bitmap_item( HDC hdc, struct menu_item *item, const RECT *rect,
+static void draw_bitmap_item( HWND hwnd, HDC hdc, struct menu_item *item, const RECT *rect,
                               struct menu *menu, HWND owner, UINT odaction )
 {
     int w = rect->right - rect->left;
@@ -2236,7 +2238,8 @@ static void draw_bitmap_item( HDC hdc, struct menu_item *item, const RECT *rect,
     /* Check if there is a magic menu item associated with this item */
     if (IS_MAGIC_BITMAP( bmp_to_draw ))
     {
-        UINT flags = 0;
+        BOOL down = FALSE, grayed = FALSE;
+        enum NONCLIENT_BUTTON_TYPE type;
         WCHAR bmchr = 0;
         RECT r;
 
@@ -2262,19 +2265,21 @@ static void draw_bitmap_item( HDC hdc, struct menu_item *item, const RECT *rect,
             }
             goto got_bitmap;
         case (INT_PTR)HBMMENU_MBAR_RESTORE:
-            flags = DFCS_CAPTIONRESTORE;
+            type = MENU_RESTORE_BUTTON;
             break;
         case (INT_PTR)HBMMENU_MBAR_MINIMIZE:
-            flags = DFCS_CAPTIONMIN;
+            type = MENU_MIN_BUTTON;
             break;
         case (INT_PTR)HBMMENU_MBAR_MINIMIZE_D:
-            flags = DFCS_CAPTIONMIN | DFCS_INACTIVE;
+            type = MENU_MIN_BUTTON;
+            grayed = TRUE;
             break;
         case (INT_PTR)HBMMENU_MBAR_CLOSE:
-            flags = DFCS_CAPTIONCLOSE;
+            type = MENU_CLOSE_BUTTON;
             break;
         case (INT_PTR)HBMMENU_MBAR_CLOSE_D:
-            flags = DFCS_CAPTIONCLOSE | DFCS_INACTIVE;
+            type = MENU_CLOSE_BUTTON;
+            grayed = TRUE;
             break;
         case (INT_PTR)HBMMENU_CALLBACK:
             {
@@ -2322,7 +2327,7 @@ static void draw_bitmap_item( HDC hdc, struct menu_item *item, const RECT *rect,
             LOGFONTW logfont = { 0, 0, 0, 0, FW_NORMAL, 0, 0, 0, SYMBOL_CHARSET, 0, 0, 0, 0,
                                  {'M','a','r','l','e','t','t'}};
             logfont.lfHeight =  min( h, w) - 5 ;
-            TRACE( " height %d rect %s\n", logfont.lfHeight, wine_dbgstr_rect( rect ));
+            TRACE( " height %d rect %s\n", (int)logfont.lfHeight, wine_dbgstr_rect( rect ));
             hfont = NtGdiHfontCreate( &logfont, sizeof(logfont), 0, 0, NULL );
             prev_font = NtGdiSelectFont( hdc, hfont );
             NtGdiExtTextOutW( hdc, rect->left, rect->top + 2, 0, NULL, &bmchr, 1, NULL, 0 );
@@ -2333,8 +2338,8 @@ static void draw_bitmap_item( HDC hdc, struct menu_item *item, const RECT *rect,
         {
             r = *rect;
             InflateRect( &r, -1, -1 );
-            if (item->fState & MF_HILITE) flags |= DFCS_PUSHED;
-            draw_frame_caption( hdc, &r, flags );
+            if (item->fState & MF_HILITE) down = TRUE;
+            draw_menu_button( hwnd, hdc, &r, type, down, grayed );
         }
         return;
     }
@@ -2605,7 +2610,7 @@ static void draw_menu_item( HWND hwnd, struct menu *menu, HWND owner, HDC hdc,
             POINT origorg;
             /* some applications make this assumption on the DC's origin */
             set_viewport_org( hdc, rect.left, rect.top, &origorg );
-            draw_bitmap_item( hdc, item, &bmprc, menu, owner, odaction );
+            draw_bitmap_item( hwnd, hdc, item, &bmprc, menu, owner, odaction );
             set_viewport_org( hdc, origorg.x, origorg.y, NULL );
         }
         /* Draw the popup-menu arrow */
@@ -2621,7 +2626,7 @@ static void draw_menu_item( HWND hwnd, struct menu *menu, HWND owner, HDC hdc,
         POINT origorg;
 
         set_viewport_org( hdc, rect.left, rect.top, &origorg);
-        draw_bitmap_item( hdc, item, &bmprc, menu, owner, odaction );
+        draw_bitmap_item( hwnd, hdc, item, &bmprc, menu, owner, odaction );
         set_viewport_org( hdc, origorg.x, origorg.y, NULL);
     }
     /* process text if present */
@@ -2878,7 +2883,7 @@ static void draw_popup_menu( HWND hwnd, HDC hdc, HMENU hmenu )
 
 LRESULT popup_menu_window_proc( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam )
 {
-    TRACE( "hwnd=%p msg=0x%04x wp=0x%04lx lp=0x%08lx\n", hwnd, message, wparam, lparam );
+    TRACE( "hwnd=%p msg=0x%04x wp=0x%04lx lp=0x%08lx\n", hwnd, message, (long)wparam, lparam );
 
     switch(message)
     {
@@ -2955,7 +2960,7 @@ static void calc_popup_menu_size( struct menu *menu, UINT max_height )
     SetRectEmpty( &menu->items_rect );
 
     if (menu->nItems == 0) return;
-    hdc = NtUserGetDCEx( 0, 0, DCX_CACHE | DCX_WINDOW );
+    hdc = NtUserGetDC( 0 );
 
     NtGdiSelectFont( hdc, get_menu_font( FALSE ));
 
@@ -3158,7 +3163,7 @@ static void select_item( HWND owner, HMENU hmenu, UINT index, BOOL send_select, 
     if (!menu || !menu->nItems || !menu->hWnd) return;
 
     if (menu->FocusedItem == index) return;
-    if (menu->wFlags & MF_POPUP) hdc = NtUserGetDCEx( menu->hWnd, 0, DCX_USESTYLE );
+    if (menu->wFlags & MF_POPUP) hdc = NtUserGetDC( menu->hWnd );
     else hdc = NtUserGetDCEx( menu->hWnd, 0, DCX_CACHE | DCX_WINDOW);
     if (!top_popup)
     {
@@ -3364,7 +3369,7 @@ static HMENU show_sub_popup( HWND owner, HMENU hmenu, BOOL select_first, UINT fl
     /* correct item if modified as a reaction to WM_INITMENUPOPUP message */
     if (!(item->fState & MF_HILITE))
     {
-        if (menu->wFlags & MF_POPUP) hdc = NtUserGetDCEx( menu->hWnd, 0, DCX_USESTYLE );
+        if (menu->wFlags & MF_POPUP) hdc = NtUserGetDC( menu->hWnd );
         else hdc = NtUserGetDCEx( menu->hWnd, 0, DCX_CACHE | DCX_WINDOW );
 
         NtGdiSelectFont( hdc, get_menu_font( FALSE ));
@@ -3449,7 +3454,7 @@ static INT exec_focused_item( MTRACKER *pmt, HMENU handle, UINT flags )
     if (!menu || !menu->nItems || menu->FocusedItem == NO_SELECTED_ITEM) return -1;
     item = &menu->items[menu->FocusedItem];
 
-    TRACE( "handle %p ID %08lx submenu %p type %04x\n", handle, item->wID,
+    TRACE( "handle %p ID %08lx submenu %p type %04x\n", handle, (long)item->wID,
            item->hSubMenu, item->fType );
 
     if ((item->fType & MF_POPUP))
@@ -4563,7 +4568,7 @@ BOOL WINAPI NtUserGetMenuBarInfo( HWND hwnd, LONG id, LONG item, MENUBARINFO *in
     struct menu *menu;
     ATOM class_atom;
 
-    TRACE( "(%p,0x%08x,0x%08x,%p)\n", hwnd, id, item, info );
+    TRACE( "(%p,0x%08x,0x%08x,%p)\n", hwnd, (int)id, (int)item, info );
 
     switch (id)
     {

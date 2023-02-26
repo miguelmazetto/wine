@@ -122,18 +122,6 @@
 # endif
 #endif
 
-#if (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined (__GNUC__)
-# include <stdarg.h>
-# undef va_list
-# undef va_start
-# undef va_end
-# undef va_copy
-# define va_list __builtin_ms_va_list
-# define va_start(list,arg) __builtin_ms_va_start(list,arg)
-# define va_end(list) __builtin_ms_va_end(list)
-# define va_copy(dest,src) __builtin_ms_va_copy(dest,src)
-#endif
-
 #ifndef WINAPIV
 # if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 #  define WINAPIV __attribute__((pcs("aapcs")))
@@ -340,6 +328,24 @@ typedef struct threadlocaleinfostruct {
 #else
 #define __WINE_CRT_PRINTF_ATTR(fmt,args)
 #define __WINE_CRT_SCANF_ATTR(fmt,args)
+#endif
+
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3)))
+#define __WINE_ALLOC_SIZE(...) __attribute__((__alloc_size__(__VA_ARGS__)))
+#else
+#define __WINE_ALLOC_SIZE(...)
+#endif
+
+#if defined(__GNUC__) && (__GNUC__ > 10)
+#define __WINE_DEALLOC(...) __attribute__((malloc (__VA_ARGS__)))
+#else
+#define __WINE_DEALLOC(...)
+#endif
+
+#if defined(__GNUC__) && (__GNUC__ > 2)
+#define __WINE_MALLOC __attribute__((malloc))
+#else
+#define __WINE_MALLOC
 #endif
 
 #endif /* __WINE_CORECRT_H */

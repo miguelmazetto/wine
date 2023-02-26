@@ -495,20 +495,49 @@ BOOL WINAPI UnloadKeyboardLayout( HKL layout )
 }
 
 
-/***********************************************************************
- *		EnableMouseInPointer (USER32.@)
- */
-BOOL WINAPI EnableMouseInPointer(BOOL enable)
-{
-    FIXME("(%#x) stub\n", enable);
-
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-static DWORD CALLBACK devnotify_window_callback(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
+static DWORD CALLBACK devnotify_window_callbackW(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
 {
     SendMessageTimeoutW(handle, WM_DEVICECHANGE, flags, (LPARAM)header, SMTO_ABORTIFHUNG, 2000, NULL);
+    return 0;
+}
+
+static DWORD CALLBACK devnotify_window_callbackA(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
+{
+    if (flags & 0x8000)
+    {
+        switch (header->dbch_devicetype)
+        {
+        case DBT_DEVTYP_DEVICEINTERFACE:
+        {
+            const DEV_BROADCAST_DEVICEINTERFACE_W *ifaceW = (const DEV_BROADCAST_DEVICEINTERFACE_W *)header;
+            size_t lenW = wcslen( ifaceW->dbcc_name );
+            DEV_BROADCAST_DEVICEINTERFACE_A *ifaceA;
+            DWORD lenA;
+
+            if (!(ifaceA = malloc( offsetof(DEV_BROADCAST_DEVICEINTERFACE_A, dbcc_name[lenW * 3 + 1]) )))
+                return 0;
+            lenA = WideCharToMultiByte( CP_ACP, 0, ifaceW->dbcc_name, lenW + 1,
+                                        ifaceA->dbcc_name, lenW * 3 + 1, NULL, NULL );
+
+            ifaceA->dbcc_size = offsetof(DEV_BROADCAST_DEVICEINTERFACE_A, dbcc_name[lenA + 1]);
+            ifaceA->dbcc_devicetype = ifaceW->dbcc_devicetype;
+            ifaceA->dbcc_reserved = ifaceW->dbcc_reserved;
+            ifaceA->dbcc_classguid = ifaceW->dbcc_classguid;
+            SendMessageTimeoutA( handle, WM_DEVICECHANGE, flags, (LPARAM)ifaceA, SMTO_ABORTIFHUNG, 2000, NULL );
+            free( ifaceA );
+            return 0;
+        }
+
+        default:
+            FIXME( "unimplemented W to A mapping for %#lx\n", header->dbch_devicetype );
+            /* fall through */
+        case DBT_DEVTYP_HANDLE:
+        case DBT_DEVTYP_OEM:
+            break;
+        }
+    }
+
+    SendMessageTimeoutA( handle, WM_DEVICECHANGE, flags, (LPARAM)header, SMTO_ABORTIFHUNG, 2000, NULL );
     return 0;
 }
 
@@ -591,8 +620,10 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationW( HANDLE handle, void *filter, DWOR
 
     if (flags & DEVICE_NOTIFY_SERVICE_HANDLE)
         details.cb = devnotify_service_callback;
+    else if (IsWindowUnicode( handle ))
+        details.cb = devnotify_window_callbackW;
     else
-        details.cb = devnotify_window_callback;
+        details.cb = devnotify_window_callbackA;
 
     return I_ScRegisterDeviceNotification( &details, filter, 0 );
 }
@@ -652,4 +683,205 @@ LRESULT WINAPI DefRawInputProc( RAWINPUT **data, INT data_count, UINT header_siz
     TRACE( "data %p, data_count %d, header_size %u.\n", data, data_count, header_size );
 
     return header_size == sizeof(RAWINPUTHEADER) ? 0 : -1;
+}
+
+/*****************************************************************************
+ * CloseTouchInputHandle (USER32.@)
+ */
+BOOL WINAPI CloseTouchInputHandle( HTOUCHINPUT handle )
+{
+    FIXME( "handle %p stub!\n", handle );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetTouchInputInfo (USER32.@)
+ */
+BOOL WINAPI GetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size )
+{
+    FIXME( "handle %p, count %u, ptr %p, size %u stub!\n", handle, count, ptr, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/**********************************************************************
+ * IsTouchWindow (USER32.@)
+ */
+BOOL WINAPI IsTouchWindow( HWND hwnd, ULONG *flags )
+{
+    FIXME( "hwnd %p, flags %p stub!\n", hwnd, flags );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * RegisterTouchWindow (USER32.@)
+ */
+BOOL WINAPI RegisterTouchWindow( HWND hwnd, ULONG flags )
+{
+    FIXME( "hwnd %p, flags %#lx stub!\n", hwnd, flags );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * UnregisterTouchWindow (USER32.@)
+ */
+BOOL WINAPI UnregisterTouchWindow( HWND hwnd )
+{
+    FIXME( "hwnd %p stub!\n", hwnd );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetGestureInfo (USER32.@)
+ */
+BOOL WINAPI CloseGestureInfoHandle( HGESTUREINFO handle )
+{
+    FIXME( "handle %p stub!\n", handle );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetGestureInfo (USER32.@)
+ */
+BOOL WINAPI GetGestureExtraArgs( HGESTUREINFO handle, UINT count, BYTE *args )
+{
+    FIXME( "handle %p, count %u, args %p stub!\n", handle, count, args );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetGestureInfo (USER32.@)
+ */
+BOOL WINAPI GetGestureInfo( HGESTUREINFO handle, GESTUREINFO *ptr )
+{
+    FIXME( "handle %p, ptr %p stub!\n", handle, ptr );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetGestureConfig (USER32.@)
+ */
+BOOL WINAPI GetGestureConfig( HWND hwnd, DWORD reserved, DWORD flags, UINT *count,
+                              GESTURECONFIG *config, UINT size )
+{
+    FIXME( "handle %p, reserved %#lx, flags %#lx, count %p, config %p, size %u stub!\n",
+           hwnd, reserved, flags, count, config, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/**********************************************************************
+ * SetGestureConfig (USER32.@)
+ */
+BOOL WINAPI SetGestureConfig( HWND hwnd, DWORD reserved, UINT count,
+                              GESTURECONFIG *config, UINT size )
+{
+    FIXME( "handle %p, reserved %#lx, count %u, config %p, size %u stub!\n",
+           hwnd, reserved, count, config, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+BOOL WINAPI GetPointerTouchInfo( UINT32 id, POINTER_TOUCH_INFO *info )
+{
+    FIXME( "id %u, info %p stub!\n", id, info );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+BOOL WINAPI GetPointerTouchInfoHistory( UINT32 id, UINT32 *count, POINTER_TOUCH_INFO *info )
+{
+    FIXME( "id %u, count %p, info %p stub!\n", id, count, info );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+
+/*******************************************************************
+ *           SetForegroundWindow  (USER32.@)
+ */
+BOOL WINAPI SetForegroundWindow( HWND hwnd )
+{
+    return NtUserSetForegroundWindow( hwnd );
+}
+
+
+/*******************************************************************
+ *           GetActiveWindow  (USER32.@)
+ */
+HWND WINAPI GetActiveWindow(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
+}
+
+
+/*****************************************************************
+ *           GetFocus  (USER32.@)
+ */
+HWND WINAPI GetFocus(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndFocus : 0;
+}
+
+
+/*******************************************************************
+ *           SetShellWindow (USER32.@)
+ */
+BOOL WINAPI SetShellWindow( HWND hwnd )
+{
+    return NtUserSetShellWindowEx( hwnd, hwnd );
+}
+
+
+/*******************************************************************
+ *           GetShellWindow (USER32.@)
+ */
+HWND WINAPI GetShellWindow(void)
+{
+    return NtUserGetShellWindow();
+}
+
+
+/***********************************************************************
+ *           SetProgmanWindow (USER32.@)
+ */
+HWND WINAPI SetProgmanWindow( HWND hwnd )
+{
+    return NtUserSetProgmanWindow( hwnd );
+}
+
+
+/***********************************************************************
+ *           GetProgmanWindow (USER32.@)
+ */
+HWND WINAPI GetProgmanWindow(void)
+{
+    return NtUserGetProgmanWindow();
+}
+
+
+/***********************************************************************
+ *           SetTaskmanWindow (USER32.@)
+ */
+HWND WINAPI SetTaskmanWindow( HWND hwnd )
+{
+    return NtUserSetTaskmanWindow( hwnd );
+}
+
+/***********************************************************************
+ *           GetTaskmanWindow (USER32.@)
+ */
+HWND WINAPI GetTaskmanWindow(void)
+{
+    return NtUserGetTaskmanWindow();
 }

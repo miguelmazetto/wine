@@ -175,7 +175,7 @@ static PRUnichar *handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *
         return NULL;
     }
 
-    buf = heap_alloc((end-ptr+1)*sizeof(WCHAR));
+    buf = malloc((end - ptr + 1) * sizeof(WCHAR));
     if(!buf)
         return NULL;
 
@@ -211,8 +211,8 @@ static nsresult run_insert_comment(HTMLDocumentNode *doc, nsISupports *comment_i
     if(replace_html) {
         HRESULT hres;
 
-        hres = replace_node_by_html(doc->nsdoc, (nsIDOMNode*)nscomment, replace_html);
-        heap_free(replace_html);
+        hres = replace_node_by_html(doc->dom_document, (nsIDOMNode*)nscomment, replace_html);
+        free(replace_html);
         if(FAILED(hres))
             nsres = NS_ERROR_FAILURE;
     }
@@ -275,16 +275,16 @@ static void parse_complete(HTMLDocumentObj *doc)
     TRACE("(%p)\n", doc);
 
     if(doc->nscontainer->usermode == EDITMODE)
-        init_editor(doc->basedoc.doc_node);
+        init_editor(doc->doc_node);
 
     call_explorer_69(doc);
     if(doc->view_sink)
         IAdviseSink_OnViewChange(doc->view_sink, DVASPECT_CONTENT, -1);
-    call_property_onchanged(&doc->basedoc.cp_container, 1005);
+    call_property_onchanged(&doc->cp_container, 1005);
     call_explorer_69(doc);
 
-    if(doc->webbrowser && doc->nscontainer->usermode != EDITMODE && !(doc->basedoc.window->load_flags & BINDING_REFRESH))
-        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->basedoc.window->base.IHTMLWindow2_iface, 0);
+    if(doc->webbrowser && !(doc->window->load_flags & BINDING_REFRESH))
+        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->window->base.IHTMLWindow2_iface, 0);
 
     /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
 }
@@ -293,19 +293,21 @@ static nsresult run_end_load(HTMLDocumentNode *This, nsISupports *arg1, nsISuppo
 {
     TRACE("(%p)\n", This);
 
-    if(!This->basedoc.doc_obj)
+    if(!This->doc_obj)
         return NS_OK;
 
-    if(This == This->basedoc.doc_obj->basedoc.doc_node) {
+    if(This == This->doc_obj->doc_node) {
         /*
          * This should be done in the worker thread that parses HTML,
          * but we don't have such thread (Gecko parses HTML for us).
          */
-        parse_complete(This->basedoc.doc_obj);
+        parse_complete(This->doc_obj);
     }
 
     bind_event_scripts(This);
-    set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
+
+    This->window->performance_timing->dom_interactive_time = get_time_stamp();
+    set_ready_state(This->outer_window, READYSTATE_INTERACTIVE);
     return NS_OK;
 }
 
@@ -359,7 +361,7 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
         if(!iter->script->parsed)
             doc_insert_script(window, iter->script, TRUE);
         IHTMLScriptElement_Release(&iter->script->IHTMLScriptElement_iface);
-        heap_free(iter);
+        free(iter);
     }
 
     IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
@@ -502,12 +504,12 @@ void process_document_response_headers(HTMLDocumentNode *doc, IBinding *binding)
 
         TRACE("size %lu\n", size);
 
-        header = heap_strdupAtoW(buf);
+        header = strdupAtoW(buf);
         if(header && parse_ua_compatible(header, &document_mode)) {
             TRACE("setting document mode %d\n", document_mode);
             set_document_mode(doc, document_mode, FALSE);
         }
-        heap_free(header);
+        free(header);
     }
 
     IWinInetHttpInfo_Release(http_info);
@@ -605,12 +607,12 @@ static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
-        htmldoc_release(&This->doc->basedoc);
+        IHTMLDOMNode_Release(&This->doc->node.IHTMLDOMNode_iface);
         if(This->arg1)
             nsISupports_Release(This->arg1);
         if(This->arg2)
             nsISupports_Release(This->arg2);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -634,14 +636,14 @@ static void add_script_runner(HTMLDocumentNode *This, runnable_proc_t proc, nsIS
 {
     nsRunnable *runnable;
 
-    runnable = heap_alloc_zero(sizeof(*runnable));
+    runnable = calloc(1, sizeof(*runnable));
     if(!runnable)
         return;
 
     runnable->nsIRunnable_iface.lpVtbl = &nsRunnableVtbl;
     runnable->ref = 1;
 
-    htmldoc_addref(&This->basedoc);
+    IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
     runnable->doc = This;
     runnable->proc = proc;
 
@@ -683,20 +685,20 @@ static nsresult NSAPI nsDocumentObserver_QueryInterface(nsIDocumentObserver *ifa
         return NS_NOINTERFACE;
     }
 
-    htmldoc_addref(&This->basedoc);
+    IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
     return NS_OK;
 }
 
 static nsrefcnt NSAPI nsDocumentObserver_AddRef(nsIDocumentObserver *iface)
 {
     HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
-    return htmldoc_addref(&This->basedoc);
+    return IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
 }
 
 static nsrefcnt NSAPI nsDocumentObserver_Release(nsIDocumentObserver *iface)
 {
     HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
-    return htmldoc_release(&This->basedoc);
+    return IHTMLDOMNode_Release(&This->node.IHTMLDOMNode_iface);
 }
 
 static void NSAPI nsDocumentObserver_CharacterDataWillChange(nsIDocumentObserver *iface,
@@ -971,7 +973,7 @@ void init_document_mutation(HTMLDocumentNode *doc)
 
     doc->nsIDocumentObserver_iface.lpVtbl = &nsDocumentObserverVtbl;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
+    nsres = nsIDOMDocument_QueryInterface(doc->dom_document, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
         ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;
@@ -986,7 +988,7 @@ void release_document_mutation(HTMLDocumentNode *doc)
     nsIDocument *nsdoc;
     nsresult nsres;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
+    nsres = nsIDOMDocument_QueryInterface(doc->dom_document, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
         ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;
@@ -996,13 +998,13 @@ void release_document_mutation(HTMLDocumentNode *doc)
     nsIDocument_Release(nsdoc);
 }
 
-JSContext *get_context_from_document(nsIDOMHTMLDocument *nsdoc)
+JSContext *get_context_from_document(nsIDOMDocument *nsdoc)
 {
     nsIDocument *doc;
     JSContext *ctx;
     nsresult nsres;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(nsdoc, &IID_nsIDocument, (void**)&doc);
+    nsres = nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDocument, (void**)&doc);
     assert(nsres == NS_OK);
 
     ctx = nsIContentUtils_GetContextFromDocument(content_utils, doc);

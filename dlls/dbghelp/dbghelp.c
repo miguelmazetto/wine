@@ -67,6 +67,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
 unsigned   dbghelp_options = SYMOPT_UNDNAME;
 BOOL       dbghelp_opt_native = FALSE;
+BOOL       dbghelp_opt_real_path = FALSE;
 SYSTEM_INFO sysinfo;
 
 static struct process* process_first /* = NULL */;
@@ -104,7 +105,7 @@ BOOL validate_addr64(DWORD64 addr)
 {
     if (sizeof(void*) == sizeof(int) && (addr >> 32))
     {
-        FIXME("Unsupported address %s\n", wine_dbgstr_longlong(addr));
+        FIXME("Unsupported address %I64x\n", addr);
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
@@ -135,7 +136,7 @@ const char* wine_dbgstr_addr(const ADDRESS64* addr)
     switch (addr->Mode)
     {
     case AddrModeFlat:
-        return wine_dbg_sprintf("flat<%s>", wine_dbgstr_longlong(addr->Offset));
+        return wine_dbg_sprintf("flat<%I64x>", addr->Offset);
     case AddrMode1616:
         return wine_dbg_sprintf("1616<%04x:%04lx>", addr->Segment, (DWORD)addr->Offset);
     case AddrMode1632:
@@ -305,13 +306,9 @@ BOOL WINAPI SymGetSearchPath(HANDLE hProcess, PSTR szSearchPath,
  */
 static BOOL WINAPI process_invade_cb(PCWSTR name, ULONG64 base, ULONG size, PVOID user)
 {
-    WCHAR       tmp[MAX_PATH];
     HANDLE      hProcess = user;
 
-    if (!GetModuleFileNameExW(hProcess, (HMODULE)(DWORD_PTR)base, tmp, ARRAY_SIZE(tmp)))
-        lstrcpynW(tmp, name, ARRAY_SIZE(tmp));
-
-    SymLoadModuleExW(hProcess, 0, tmp, name, base, size, NULL, 0);
+    SymLoadModuleExW(hProcess, 0, name, NULL, base, size, NULL, 0);
     return TRUE;
 }
 
@@ -332,6 +329,14 @@ const WCHAR *process_getenv(const struct process *process, const WCHAR *name)
     return NULL;
 }
 
+const struct cpu* process_get_cpu(const struct process* pcs)
+{
+    const struct module* m = pcs->lmodules;
+
+    /* return cpu of main module, which is the first module in process's modules list */
+    return (m) ? m->cpu : dbghelp_current_cpu;
+}
+
 /******************************************************************
  *		check_live_target
  *
@@ -339,7 +344,8 @@ const WCHAR *process_getenv(const struct process *process, const WCHAR *name)
 static BOOL check_live_target(struct process* pcs, BOOL wow64, BOOL child_wow64)
 {
     PROCESS_BASIC_INFORMATION pbi;
-    ULONG_PTR base = 0, env = 0;
+    DWORD64 base = 0, env = 0;
+    const char* peb_addr;
 
     if (!GetProcessId(pcs->handle)) return FALSE;
     if (GetEnvironmentVariableA("DBGHELP_NOLIVE", NULL, 0)) return FALSE;
@@ -348,27 +354,44 @@ static BOOL check_live_target(struct process* pcs, BOOL wow64, BOOL child_wow64)
                                    &pbi, sizeof(pbi), NULL ))
         return FALSE;
 
+    /* Note: we have to deal with the PEB64 and PEB32 in debuggee process
+     * while debugger can be in same or different bitness.
+     * For a 64 bit debuggee, use PEB64 and underlying ELF/system 64 (easy).
+     * For a 32 bit debuggee,
+     * - for environment variables, we need PEB32
+     * - for ELF/system base address, we need PEB32 when run in pure 32bit
+     *   or run in old wow configuration, but PEB64 when run in new wow
+     *   configuration.
+     * - this must be read from a debugger in either 32 or 64 bit setup.
+     */
+    peb_addr = (const char*)pbi.PebBaseAddress;
     if (!pcs->is_64bit)
     {
-        const char* peb32_addr;
         DWORD env32;
         PEB32 peb32;
 
         C_ASSERT(sizeof(void*) != 4 || FIELD_OFFSET(RTL_USER_PROCESS_PARAMETERS, Environment) == 0x48);
-        peb32_addr = (const char*)pbi.PebBaseAddress;
+
         if (!wow64 && child_wow64)
             /* current process is 64bit, while child process is 32 bit, need to read 32bit PEB */
-            peb32_addr += 0x1000;
-        if (!ReadProcessMemory(pcs->handle, peb32_addr, &peb32, sizeof(peb32), NULL)) return FALSE;
-        if (!ReadProcessMemory(pcs->handle, peb32_addr + 0x460 /* CloudFileFlags */, &base, sizeof(base), NULL)) return FALSE;
+            peb_addr += 0x1000;
+        if (!ReadProcessMemory(pcs->handle, peb_addr, &peb32, sizeof(peb32), NULL)) return FALSE;
+        base = *(const DWORD*)((const char*)&peb32 + 0x460 /* CloudFileFlags */);
+        pcs->is_system_64bit = FALSE;
         if (read_process_memory(pcs, peb32.ProcessParameters + 0x48, &env32, sizeof(env32))) env = env32;
     }
-    else
+    if (pcs->is_64bit || base == 0)
     {
-        PEB peb;
-        if (!ReadProcessMemory(pcs->handle, pbi.PebBaseAddress, &peb, sizeof(peb), NULL)) return FALSE;
-        if (!ReadProcessMemory(pcs->handle, (char *)pbi.PebBaseAddress + FIELD_OFFSET(PEB, CloudFileFlags), &base, sizeof(base), NULL)) return FALSE;
-        ReadProcessMemory(pcs->handle, (char *)peb.ProcessParameters + FIELD_OFFSET(RTL_USER_PROCESS_PARAMETERS, Environment), &env, sizeof(env), NULL);
+        PEB64 peb;
+
+        if (!pcs->is_64bit) peb_addr -= 0x1000; /* PEB32 => PEB64 */
+        if (!ReadProcessMemory(pcs->handle, peb_addr, &peb, sizeof(peb), NULL)) return FALSE;
+        base = peb.CloudFileFlags;
+        pcs->is_system_64bit = TRUE;
+        if (pcs->is_64bit)
+            ReadProcessMemory(pcs->handle,
+                              (char *)(ULONG_PTR)peb.ProcessParameters + FIELD_OFFSET(RTL_USER_PROCESS_PARAMETERS, Environment),
+                              &env, sizeof(env), NULL);
     }
 
     /* read debuggee environment block */
@@ -409,9 +432,9 @@ static BOOL check_live_target(struct process* pcs, BOOL wow64, BOOL child_wow64)
 
     if (!base) return FALSE;
 
-    TRACE("got debug info address %#Ix from PEB %p\n", base, pbi.PebBaseAddress);
+    TRACE("got debug info address %#I64x from PEB %p\n", base, pbi.PebBaseAddress);
     if (!elf_read_wine_loader_dbg_info(pcs, base) && !macho_read_wine_loader_dbg_info(pcs, base))
-        WARN("couldn't load process debug info at %#Ix\n", base);
+        WARN("couldn't load process debug info at %#I64x\n", base);
     return TRUE;
 }
 
@@ -592,6 +615,10 @@ BOOL WINAPI SymSetExtendedOption(IMAGEHLP_EXTENDED_OPTIONS option, BOOL value)
             old = dbghelp_opt_native;
             dbghelp_opt_native = value;
             break;
+        case SYMOPT_EX_WINE_MODULE_REAL_PATH:
+            old = dbghelp_opt_real_path;
+            dbghelp_opt_real_path = value;
+            break;
         default:
             FIXME("Unsupported option %d with value %d\n", option, value);
     }
@@ -609,6 +636,8 @@ BOOL WINAPI SymGetExtendedOption(IMAGEHLP_EXTENDED_OPTIONS option)
     {
         case SYMOPT_EX_WINE_NATIVE_MODULES:
             return dbghelp_opt_native;
+        case SYMOPT_EX_WINE_MODULE_REAL_PATH:
+            return dbghelp_opt_real_path;
         default:
             FIXME("Unsupported option %d\n", option);
     }
@@ -694,7 +723,7 @@ BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
     sym = symt_index2ptr(pair.effective, index);
     if (!symt_check_tag(sym, SymTagFunction)) return FALSE;
 
-    pair.pcs->localscope_pc = ((struct symt_function*)sym)->address; /* FIXME of FuncDebugStart when it exists? */
+    pair.pcs->localscope_pc = ((struct symt_function*)sym)->ranges[0].low; /* FIXME of FuncDebugStart when it exists? */
     pair.pcs->localscope_symt = sym;
 
     return TRUE;
@@ -706,7 +735,7 @@ BOOL WINAPI SymSetScopeFromIndex(HANDLE hProcess, ULONG64 addr, DWORD index)
 BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD inlinectx)
 {
     struct module_pair pair;
-    struct symt_inlinesite* inlined;
+    struct symt_function* inlined;
 
     TRACE("(%p %I64x %lx)\n", hProcess, addr, inlinectx);
 
@@ -718,7 +747,7 @@ BOOL WINAPI SymSetScopeFromInlineContext(HANDLE hProcess, ULONG64 addr, DWORD in
         if (inlined)
         {
             pair.pcs->localscope_pc = addr;
-            pair.pcs->localscope_symt = &inlined->func.symt;
+            pair.pcs->localscope_symt = &inlined->symt;
             return TRUE;
         }
         /* fall through */
@@ -858,24 +887,22 @@ BOOL WINAPI SymRegisterCallback(HANDLE hProcess,
 /***********************************************************************
  *		SymRegisterCallback64 (DBGHELP.@)
  */
-BOOL WINAPI SymRegisterCallback64(HANDLE hProcess, 
+BOOL WINAPI SymRegisterCallback64(HANDLE hProcess,
                                   PSYMBOL_REGISTERED_CALLBACK64 CallbackFunction,
                                   ULONG64 UserContext)
 {
-    TRACE("(%p, %p, %s)\n", 
-          hProcess, CallbackFunction, wine_dbgstr_longlong(UserContext));
+    TRACE("(%p, %p, %I64x)\n", hProcess, CallbackFunction, UserContext);
     return sym_register_cb(hProcess, CallbackFunction, NULL, UserContext, FALSE);
 }
 
 /***********************************************************************
  *		SymRegisterCallbackW64 (DBGHELP.@)
  */
-BOOL WINAPI SymRegisterCallbackW64(HANDLE hProcess, 
+BOOL WINAPI SymRegisterCallbackW64(HANDLE hProcess,
                                    PSYMBOL_REGISTERED_CALLBACK64 CallbackFunction,
                                    ULONG64 UserContext)
 {
-    TRACE("(%p, %p, %s)\n", 
-          hProcess, CallbackFunction, wine_dbgstr_longlong(UserContext));
+    TRACE("(%p, %p, %I64x)\n", hProcess, CallbackFunction, UserContext);
     return sym_register_cb(hProcess, CallbackFunction, NULL, UserContext, TRUE);
 }
 

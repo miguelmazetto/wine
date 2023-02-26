@@ -68,6 +68,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
+#include "dwarf.h"
+
 /***********************************************************************
  * signal context platform-specific definitions
  */
@@ -127,8 +129,6 @@ static DWORD64 get_fault_esr( ucontext_t *sigcontext )
 
 #endif /* linux */
 
-static pthread_key_t teb_key;
-
 struct syscall_frame
 {
     ULONG64               x[29];          /* 000 */
@@ -172,14 +172,146 @@ static BOOL is_inside_syscall( ucontext_t *sigcontext )
 extern void raise_func_trampoline( EXCEPTION_RECORD *rec, CONTEXT *context, void *dispatcher );
 
 /***********************************************************************
- *           unwind_builtin_dll
+ *           dwarf_virtual_unwind
  *
  * Equivalent of RtlVirtualUnwind for builtin modules.
  */
-NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context )
+static NTSTATUS dwarf_virtual_unwind( ULONG64 ip, ULONG64 *frame, CONTEXT *context,
+                                      const struct dwarf_fde *fde, const struct dwarf_eh_bases *bases,
+                                      PEXCEPTION_ROUTINE *handler, void **handler_data )
 {
+    const struct dwarf_cie *cie;
+    const unsigned char *ptr, *augmentation, *end;
+    ULONG_PTR len, code_end;
+    struct frame_info info;
+    struct frame_state state_stack[MAX_SAVED_STATES];
+    int aug_z_format = 0;
+    unsigned char lsda_encoding = DW_EH_PE_omit;
+
+    memset( &info, 0, sizeof(info) );
+    info.state_stack = state_stack;
+    info.ip = (ULONG_PTR)bases->func;
+    *handler = NULL;
+
+    cie = (const struct dwarf_cie *)((const char *)&fde->cie_offset - fde->cie_offset);
+
+    /* parse the CIE first */
+
+    if (cie->version != 1 && cie->version != 3)
+    {
+        FIXME( "unknown CIE version %u at %p\n", cie->version, cie );
+        return STATUS_INVALID_DISPOSITION;
+    }
+    ptr = cie->augmentation + strlen((const char *)cie->augmentation) + 1;
+
+    info.code_align = dwarf_get_uleb128( &ptr );
+    info.data_align = dwarf_get_sleb128( &ptr );
+    if (cie->version == 1)
+        info.retaddr_reg = *ptr++;
+    else
+        info.retaddr_reg = dwarf_get_uleb128( &ptr );
+    info.state.cfa_rule = RULE_CFA_OFFSET;
+
+    TRACE( "function %lx base %p cie %p len %x id %x version %x aug '%s' code_align %lu data_align %ld retaddr %s\n",
+           ip, bases->func, cie, cie->length, cie->id, cie->version, cie->augmentation,
+           info.code_align, info.data_align, dwarf_reg_names[info.retaddr_reg] );
+
+    end = NULL;
+    for (augmentation = cie->augmentation; *augmentation; augmentation++)
+    {
+        switch (*augmentation)
+        {
+        case 'z':
+            len = dwarf_get_uleb128( &ptr );
+            end = ptr + len;
+            aug_z_format = 1;
+            continue;
+        case 'L':
+            lsda_encoding = *ptr++;
+            continue;
+        case 'P':
+        {
+            unsigned char encoding = *ptr++;
+            *handler = (void *)dwarf_get_ptr( &ptr, encoding, bases );
+            continue;
+        }
+        case 'R':
+            info.fde_encoding = *ptr++;
+            continue;
+        case 'S':
+            info.signal_frame = 1;
+            continue;
+        }
+        FIXME( "unknown augmentation '%c'\n", *augmentation );
+        if (!end) return STATUS_INVALID_DISPOSITION;  /* cannot continue */
+        break;
+    }
+    if (end) ptr = end;
+
+    end = (const unsigned char *)(&cie->length + 1) + cie->length;
+    execute_cfa_instructions( ptr, end, ip, &info, bases );
+
+    ptr = (const unsigned char *)(fde + 1);
+    info.ip = dwarf_get_ptr( &ptr, info.fde_encoding, bases );  /* fde code start */
+    code_end = info.ip + dwarf_get_ptr( &ptr, info.fde_encoding & 0x0f, bases );  /* fde code length */
+
+    if (aug_z_format)  /* get length of augmentation data */
+    {
+        len = dwarf_get_uleb128( &ptr );
+        end = ptr + len;
+    }
+    else end = NULL;
+
+    *handler_data = (void *)dwarf_get_ptr( &ptr, lsda_encoding, bases );
+    if (end) ptr = end;
+
+    end = (const unsigned char *)(&fde->length + 1) + fde->length;
+    TRACE( "fde %p len %x personality %p lsda %p code %lx-%lx\n",
+           fde, fde->length, *handler, *handler_data, info.ip, code_end );
+    execute_cfa_instructions( ptr, end, ip, &info, bases );
+    *frame = context->Sp;
+    apply_frame_state( context, &info.state, bases );
+    context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
+    /* Set Pc based on Lr; libunwind also does this as part of unw_step. */
+    context->Pc = context->u.s.Lr;
+
+    if (bases->func == (void *)raise_func_trampoline) {
+        /* raise_func_trampoline has a full CONTEXT stored on the stack;
+         * restore the original Lr value from there. The function we unwind
+         * to might be a leaf function that hasn't backed up its own original
+         * Lr value on the stack.
+         * We could also just restore the full context here without doing
+         * unw_step at all. */
+        const CONTEXT *next_ctx = (const CONTEXT *) *frame;
+        context->u.s.Lr = next_ctx->u.s.Lr;
+    }
+
+    TRACE( "next function pc=%016lx\n", context->Pc );
+    TRACE("  x0=%016lx  x1=%016lx  x2=%016lx  x3=%016lx\n",
+          context->u.s.X0, context->u.s.X1, context->u.s.X2, context->u.s.X3 );
+    TRACE("  x4=%016lx  x5=%016lx  x6=%016lx  x7=%016lx\n",
+          context->u.s.X4, context->u.s.X5, context->u.s.X6, context->u.s.X7 );
+    TRACE("  x8=%016lx  x9=%016lx x10=%016lx x11=%016lx\n",
+          context->u.s.X8, context->u.s.X9, context->u.s.X10, context->u.s.X11 );
+    TRACE(" x12=%016lx x13=%016lx x14=%016lx x15=%016lx\n",
+          context->u.s.X12, context->u.s.X13, context->u.s.X14, context->u.s.X15 );
+    TRACE(" x16=%016lx x17=%016lx x18=%016lx x19=%016lx\n",
+          context->u.s.X16, context->u.s.X17, context->u.s.X18, context->u.s.X19 );
+    TRACE(" x20=%016lx x21=%016lx x22=%016lx x23=%016lx\n",
+          context->u.s.X20, context->u.s.X21, context->u.s.X22, context->u.s.X23 );
+    TRACE(" x24=%016lx x25=%016lx x26=%016lx x27=%016lx\n",
+          context->u.s.X24, context->u.s.X25, context->u.s.X26, context->u.s.X27 );
+    TRACE(" x28=%016lx  fp=%016lx  lr=%016lx  sp=%016lx\n",
+          context->u.s.X28, context->u.s.Fp, context->u.s.Lr, context->Sp );
+
+    return STATUS_SUCCESS;
+}
+
+
 #ifdef HAVE_LIBUNWIND
-    ULONG_PTR ip = context->Pc;
+static NTSTATUS libunwind_virtual_unwind( ULONG_PTR ip, ULONG_PTR *frame, CONTEXT *context,
+                                          PEXCEPTION_ROUTINE *handler, void **handler_data )
+{
     unw_context_t unw_context;
     unw_cursor_t cursor;
     unw_proc_info_t info;
@@ -222,8 +354,8 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CON
     {
         TRACE( "no info found for %lx ip %lx-%lx, assuming leaf function\n",
                ip, info.start_ip, info.end_ip );
-        dispatch->LanguageHandler = NULL;
-        dispatch->EstablisherFrame = context->Sp;
+        *handler = NULL;
+        *frame = context->Sp;
         context->Pc = context->u.s.Lr;
         context->ContextFlags |= CONTEXT_UNWOUND_TO_CALL;
         return STATUS_SUCCESS;
@@ -240,9 +372,9 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CON
         return STATUS_INVALID_DISPOSITION;
     }
 
-    dispatch->LanguageHandler  = (void *)info.handler;
-    dispatch->HandlerData      = (void *)info.lsda;
-    dispatch->EstablisherFrame = context->Sp;
+    *handler      = (void *)info.handler;
+    *handler_data = (void *)info.lsda;
+    *frame        = context->Sp;
 #ifdef __APPLE__
     {
         int i;
@@ -296,7 +428,7 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CON
          * Lr value on the stack.
          * We could also just restore the full context here without doing
          * unw_step at all. */
-        const CONTEXT *next_ctx = (const CONTEXT *) dispatch->EstablisherFrame;
+        const CONTEXT *next_ctx = (const CONTEXT *) *frame;
         context->u.s.Lr = next_ctx->u.s.Lr;
     }
 
@@ -318,6 +450,28 @@ NTSTATUS CDECL unwind_builtin_dll( ULONG type, DISPATCHER_CONTEXT *dispatch, CON
     TRACE(" x28=%016lx  fp=%016lx  lr=%016lx  sp=%016lx\n",
           context->u.s.X28, context->u.s.Fp, context->u.s.Lr, context->Sp );
     return STATUS_SUCCESS;
+}
+#endif
+
+/***********************************************************************
+ *           unwind_builtin_dll
+ *
+ * Equivalent of RtlVirtualUnwind for builtin modules.
+ */
+NTSTATUS unwind_builtin_dll( void *args )
+{
+    struct unwind_builtin_dll_params *params = args;
+    DISPATCHER_CONTEXT *dispatch = params->dispatch;
+    CONTEXT *context = params->context;
+    struct dwarf_eh_bases bases;
+    const struct dwarf_fde *fde = _Unwind_Find_FDE( (void *)(context->Pc - 1), &bases );
+
+    if (fde)
+        return dwarf_virtual_unwind( context->Pc, &dispatch->EstablisherFrame, context, fde,
+                                     &bases, &dispatch->LanguageHandler, &dispatch->HandlerData );
+#ifdef HAVE_LIBUNWIND
+    return libunwind_virtual_unwind( context->Pc, &dispatch->EstablisherFrame, context,
+                                     &dispatch->LanguageHandler, &dispatch->HandlerData );
 #else
     ERR("libunwind not available, unable to unwind\n");
     return STATUS_INVALID_DISPOSITION;
@@ -536,8 +690,9 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
  */
 NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
 {
-    BOOL self;
+    BOOL self = (handle == GetCurrentThread());
     USHORT machine;
+    void *frame;
 
     switch (size)
     {
@@ -545,7 +700,112 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
     case sizeof(ARM_CONTEXT): machine = IMAGE_FILE_MACHINE_ARMNT; break;
     default: return STATUS_INFO_LENGTH_MISMATCH;
     }
-    return set_thread_context( handle, ctx, &self, machine );
+
+    if (!self)
+    {
+        NTSTATUS ret = set_thread_context( handle, ctx, &self, machine );
+        if (ret || !self) return ret;
+    }
+
+    if (!(frame = get_cpu_area( machine ))) return STATUS_INVALID_PARAMETER;
+
+    switch (machine)
+    {
+    case IMAGE_FILE_MACHINE_I386:
+    {
+        I386_CONTEXT *wow_frame = frame;
+        const I386_CONTEXT *context = ctx;
+        DWORD flags = context->ContextFlags & ~CONTEXT_i386;
+
+        if (flags & CONTEXT_I386_INTEGER)
+        {
+            wow_frame->Eax = context->Eax;
+            wow_frame->Ebx = context->Ebx;
+            wow_frame->Ecx = context->Ecx;
+            wow_frame->Edx = context->Edx;
+            wow_frame->Esi = context->Esi;
+            wow_frame->Edi = context->Edi;
+        }
+        if (flags & CONTEXT_I386_CONTROL)
+        {
+            WOW64_CPURESERVED *cpu = NtCurrentTeb()->TlsSlots[WOW64_TLS_CPURESERVED];
+
+            wow_frame->Esp    = context->Esp;
+            wow_frame->Ebp    = context->Ebp;
+            wow_frame->Eip    = context->Eip;
+            wow_frame->EFlags = context->EFlags;
+            wow_frame->SegCs  = context->SegCs;
+            wow_frame->SegSs  = context->SegSs;
+            cpu->Flags |= WOW64_CPURESERVED_FLAG_RESET_STATE;
+        }
+        if (flags & CONTEXT_I386_SEGMENTS)
+        {
+            wow_frame->SegDs = context->SegDs;
+            wow_frame->SegEs = context->SegEs;
+            wow_frame->SegFs = context->SegFs;
+            wow_frame->SegGs = context->SegGs;
+        }
+        if (flags & CONTEXT_I386_DEBUG_REGISTERS)
+        {
+            wow_frame->Dr0 = context->Dr0;
+            wow_frame->Dr1 = context->Dr1;
+            wow_frame->Dr2 = context->Dr2;
+            wow_frame->Dr3 = context->Dr3;
+            wow_frame->Dr6 = context->Dr6;
+            wow_frame->Dr7 = context->Dr7;
+        }
+        if (flags & CONTEXT_I386_EXTENDED_REGISTERS)
+        {
+            memcpy( &wow_frame->ExtendedRegisters, context->ExtendedRegisters, sizeof(context->ExtendedRegisters) );
+        }
+        if (flags & CONTEXT_I386_FLOATING_POINT)
+        {
+            memcpy( &wow_frame->FloatSave, &context->FloatSave, sizeof(context->FloatSave) );
+        }
+        /* FIXME: CONTEXT_I386_XSTATE */
+        break;
+    }
+
+    case IMAGE_FILE_MACHINE_ARMNT:
+    {
+        ARM_CONTEXT *wow_frame = frame;
+        const ARM_CONTEXT *context = ctx;
+        DWORD flags = context->ContextFlags & ~CONTEXT_ARM;
+
+        if (flags & CONTEXT_INTEGER)
+        {
+            wow_frame->R0  = context->R0;
+            wow_frame->R1  = context->R1;
+            wow_frame->R2  = context->R2;
+            wow_frame->R3  = context->R3;
+            wow_frame->R4  = context->R4;
+            wow_frame->R5  = context->R5;
+            wow_frame->R6  = context->R6;
+            wow_frame->R7  = context->R7;
+            wow_frame->R8  = context->R8;
+            wow_frame->R9  = context->R9;
+            wow_frame->R10 = context->R10;
+            wow_frame->R11 = context->R11;
+            wow_frame->R12 = context->R12;
+        }
+        if (flags & CONTEXT_CONTROL)
+        {
+            wow_frame->Sp = context->Sp;
+            wow_frame->Lr = context->Lr;
+            wow_frame->Pc = context->Pc & ~1;
+            wow_frame->Cpsr = context->Cpsr;
+            if (context->Cpsr & 0x20) wow_frame->Pc |= 1; /* thumb */
+        }
+        if (flags & CONTEXT_FLOATING_POINT)
+        {
+            wow_frame->Fpscr = context->Fpscr;
+            memcpy( wow_frame->u.D, context->u.D, sizeof(context->u.D) );
+        }
+        break;
+    }
+
+    }
+    return STATUS_SUCCESS;
 }
 
 
@@ -554,8 +814,9 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
  */
 NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
 {
-    BOOL self;
+    BOOL self = (handle == GetCurrentThread());
     USHORT machine;
+    void *frame;
 
     switch (size)
     {
@@ -563,7 +824,105 @@ NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
     case sizeof(ARM_CONTEXT): machine = IMAGE_FILE_MACHINE_ARMNT; break;
     default: return STATUS_INFO_LENGTH_MISMATCH;
     }
-    return get_thread_context( handle, ctx, &self, machine );
+
+    if (!self)
+    {
+        NTSTATUS ret = get_thread_context( handle, ctx, &self, machine );
+        if (ret || !self) return ret;
+    }
+
+    if (!(frame = get_cpu_area( machine ))) return STATUS_INVALID_PARAMETER;
+
+    switch (machine)
+    {
+    case IMAGE_FILE_MACHINE_I386:
+    {
+        I386_CONTEXT *wow_frame = frame, *context = ctx;
+        DWORD needed_flags = context->ContextFlags & ~CONTEXT_i386;
+
+        if (needed_flags & CONTEXT_I386_INTEGER)
+        {
+            context->Eax = wow_frame->Eax;
+            context->Ebx = wow_frame->Ebx;
+            context->Ecx = wow_frame->Ecx;
+            context->Edx = wow_frame->Edx;
+            context->Esi = wow_frame->Esi;
+            context->Edi = wow_frame->Edi;
+            context->ContextFlags |= CONTEXT_I386_INTEGER;
+        }
+        if (needed_flags & CONTEXT_I386_CONTROL)
+        {
+            context->Esp    = wow_frame->Esp;
+            context->Ebp    = wow_frame->Ebp;
+            context->Eip    = wow_frame->Eip;
+            context->EFlags = wow_frame->EFlags;
+            context->SegCs  = wow_frame->SegCs;
+            context->SegSs  = wow_frame->SegSs;
+            context->ContextFlags |= CONTEXT_I386_CONTROL;
+        }
+        if (needed_flags & CONTEXT_I386_SEGMENTS)
+        {
+            context->SegDs = wow_frame->SegDs;
+            context->SegEs = wow_frame->SegEs;
+            context->SegFs = wow_frame->SegFs;
+            context->SegGs = wow_frame->SegGs;
+            context->ContextFlags |= CONTEXT_I386_SEGMENTS;
+        }
+        if (needed_flags & CONTEXT_I386_EXTENDED_REGISTERS)
+        {
+            memcpy( context->ExtendedRegisters, &wow_frame->ExtendedRegisters, sizeof(context->ExtendedRegisters) );
+            context->ContextFlags |= CONTEXT_I386_EXTENDED_REGISTERS;
+        }
+        if (needed_flags & CONTEXT_I386_FLOATING_POINT)
+        {
+            memcpy( &context->FloatSave, &wow_frame->FloatSave, sizeof(context->FloatSave) );
+            context->ContextFlags |= CONTEXT_I386_FLOATING_POINT;
+        }
+        /* FIXME: CONTEXT_I386_XSTATE */
+        break;
+    }
+
+    case IMAGE_FILE_MACHINE_ARMNT:
+    {
+        ARM_CONTEXT *wow_frame = frame, *context = ctx;
+        DWORD needed_flags = context->ContextFlags & ~CONTEXT_ARM;
+
+        if (needed_flags & CONTEXT_INTEGER)
+        {
+            context->R0  = wow_frame->R0;
+            context->R1  = wow_frame->R1;
+            context->R2  = wow_frame->R2;
+            context->R3  = wow_frame->R3;
+            context->R4  = wow_frame->R4;
+            context->R5  = wow_frame->R5;
+            context->R6  = wow_frame->R6;
+            context->R7  = wow_frame->R7;
+            context->R8  = wow_frame->R8;
+            context->R9  = wow_frame->R9;
+            context->R10 = wow_frame->R10;
+            context->R11 = wow_frame->R11;
+            context->R12 = wow_frame->R12;
+            context->ContextFlags |= CONTEXT_INTEGER;
+        }
+        if (needed_flags & CONTEXT_CONTROL)
+        {
+            context->Sp   = wow_frame->Sp;
+            context->Lr   = wow_frame->Lr;
+            context->Pc   = wow_frame->Pc;
+            context->Cpsr = wow_frame->Cpsr;
+            context->ContextFlags |= CONTEXT_CONTROL;
+        }
+        if (needed_flags & CONTEXT_FLOATING_POINT)
+        {
+            context->Fpscr = wow_frame->Fpscr;
+            memcpy( context->u.D, wow_frame->u.D, sizeof(wow_frame->u.D) );
+            context->ContextFlags |= CONTEXT_FLOATING_POINT;
+        }
+        break;
+    }
+
+    }
+    return STATUS_SUCCESS;
 }
 
 
@@ -723,56 +1082,104 @@ NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *context
 }
 
 
-struct user_callback_frame
-{
-    struct syscall_frame frame;
-    void               **ret_ptr;
-    ULONG               *ret_len;
-    __wine_jmp_buf       jmpbuf;
-    NTSTATUS             status;
-    void                *teb_frame;
-};
+/***********************************************************************
+ *           call_user_mode_callback
+ */
+extern NTSTATUS CDECL call_user_mode_callback( void *func, void *stack, void **ret_ptr,
+                                               ULONG *ret_len, TEB *teb ) DECLSPEC_HIDDEN;
+__ASM_GLOBAL_FUNC( call_user_mode_callback,
+                   "stp x29, x30, [sp,#-0xc0]!\n\t"
+                   "mov x29, sp\n\t"
+                   "mov x16, x0\n\t"              /* func */
+                   "mov x17, x1\n\t"              /* stack */
+                   "mov x18, x4\n\t"              /* teb */
+                   "stp x19, x20, [x29, #0x10]\n\t"
+                   "stp x21, x22, [x29, #0x20]\n\t"
+                   "stp x23, x24, [x29, #0x30]\n\t"
+                   "stp x25, x26, [x29, #0x40]\n\t"
+                   "stp x27, x28, [x29, #0x50]\n\t"
+                   "stp d8,  d9,  [x29, #0x60]\n\t"
+                   "stp d10, d11, [x29, #0x70]\n\t"
+                   "stp d12, d13, [x29, #0x80]\n\t"
+                   "stp d14, d15, [x29, #0x90]\n\t"
+                   "stp x2, x3, [x29, #0xa0]\n\t" /* ret_ptr, ret_len */
+                   "mrs x5, fpcr\n\t"
+                   "mrs x6, fpsr\n\t"
+                   "bfi x5, x6, #0, #32\n\t"
+                   "ldr x6, [x18]\n\t"            /* teb->Tib.ExceptionList */
+                   "stp x5, x6, [x29, #0xb0]\n\t"
+
+                   "ldr x7, [x18, #0x2f8]\n\t"    /* arm64_thread_data()->syscall_frame */
+                   "sub x5, sp, #0x330\n\t"       /* sizeof(struct syscall_frame) */
+                   "str x5, [x18, #0x2f8]\n\t"    /* arm64_thread_data()->syscall_frame */
+                   "ldr x8, [x7, #0x118]\n\t"     /* prev_frame->syscall_table */
+                   "ldp x0, x1, [x17]\n\t"        /* id, args */
+                   "ldr x2, [x17, #0x10]\n\t"     /* len */
+                   "mov sp, x17\n\t"
+                   "stp x7, x8, [x5, #0x110]\n\t" /* frame->prev_frame, frame->syscall_table */
+                   "br x16" )
+
+
+/***********************************************************************
+ *           user_mode_callback_return
+ */
+extern void CDECL DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
+                                                               NTSTATUS status, TEB *teb ) DECLSPEC_HIDDEN;
+__ASM_GLOBAL_FUNC( user_mode_callback_return,
+                   "ldr x4, [x3, #0x2f8]\n\t"     /* arm64_thread_data()->syscall_frame */
+                   "ldr x5, [x4, #0x110]\n\t"     /* prev_frame */
+                   "str x5, [x3, #0x2f8]\n\t"     /* arm64_thread_data()->syscall_frame */
+                   "add x29, x4, #0x330\n\t"      /* sizeof(struct syscall_frame) */
+                   "ldp x5, x6, [x29, #0xb0]\n\t"
+                   "str x6, [x3]\n\t"             /* teb->Tib.ExceptionList */
+                   "msr fpcr, x5\n\t"
+                   "lsr x5, x5, #32\n\t"
+                   "msr fpsr, x5\n\t"
+                   "ldp x19, x20, [x29, #0x10]\n\t"
+                   "ldp x21, x22, [x29, #0x20]\n\t"
+                   "ldp x23, x24, [x29, #0x30]\n\t"
+                   "ldp x25, x26, [x29, #0x40]\n\t"
+                   "ldp x27, x28, [x29, #0x50]\n\t"
+                   "ldp d8,  d9,  [x29, #0x60]\n\t"
+                   "ldp d10, d11, [x29, #0x70]\n\t"
+                   "ldp d12, d13, [x29, #0x80]\n\t"
+                   "ldp d14, d15, [x29, #0x90]\n\t"
+                   "ldp x5, x6, [x29, #0xa0]\n\t" /* ret_ptr, ret_len */
+                   "str x0, [x5]\n\t"             /* ret_ptr */
+                   "str w1, [x6]\n\t"             /* ret_len */
+                   "mov x0, x2\n\t"               /* status */
+                   "mov sp, x29\n\t"
+                   "ldp x29, x30, [sp], #0xc0\n\t"
+                   "ret" )
+
 
 /***********************************************************************
  *           KeUserModeCallback
  */
 NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void **ret_ptr, ULONG *ret_len )
 {
-    struct user_callback_frame callback_frame = { {{ 0 }}, ret_ptr, ret_len };
+    struct syscall_frame *frame = arm64_thread_data()->syscall_frame;
+    void *args_data = (void *)((frame->sp - len) & ~15);
+    ULONG_PTR *stack = args_data;
 
     /* if we have no syscall frame, call the callback directly */
-    if ((char *)&callback_frame < (char *)ntdll_get_thread_data()->kernel_stack ||
-        (char *)&callback_frame > (char *)arm64_thread_data()->syscall_frame)
+    if ((char *)&frame < (char *)ntdll_get_thread_data()->kernel_stack ||
+        (char *)&frame > (char *)arm64_thread_data()->syscall_frame)
     {
         NTSTATUS (WINAPI *func)(const void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
         return func( args, len );
     }
 
-    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&callback_frame)
+    if ((char *)ntdll_get_thread_data()->kernel_stack + min_kernel_stack > (char *)&frame)
         return STATUS_STACK_OVERFLOW;
 
-    if (!__wine_setjmpex( &callback_frame.jmpbuf, NULL ))
-    {
-        struct syscall_frame *frame = arm64_thread_data()->syscall_frame;
-        void *args_data = (void *)((frame->sp - len) & ~15);
+    memcpy( args_data, args, len );
+    *(--stack) = 0;
+    *(--stack) = len;
+    *(--stack) = (ULONG_PTR)args_data;
+    *(--stack) = id;
 
-        memcpy( args_data, args, len );
-
-        callback_frame.frame.x[0]          = id;
-        callback_frame.frame.x[1]          = (ULONG_PTR)args;
-        callback_frame.frame.x[2]          = len;
-        callback_frame.frame.x[18]         = frame->x[18];
-        callback_frame.frame.sp            = (ULONG_PTR)args_data;
-        callback_frame.frame.pc            = (ULONG_PTR)pKiUserCallbackDispatcher;
-        callback_frame.frame.restore_flags = CONTEXT_INTEGER;
-        callback_frame.frame.syscall_table = frame->syscall_table;
-        callback_frame.frame.prev_frame    = frame;
-        callback_frame.teb_frame           = NtCurrentTeb()->Tib.ExceptionList;
-        arm64_thread_data()->syscall_frame = &callback_frame.frame;
-
-        __wine_syscall_dispatcher_return( &callback_frame.frame, 0 );
-    }
-    return callback_frame.status;
+    return call_user_mode_callback( pKiUserCallbackDispatcher, stack, ret_ptr, ret_len, NtCurrentTeb() );
 }
 
 
@@ -781,16 +1188,8 @@ NTSTATUS WINAPI KeUserModeCallback( ULONG id, const void *args, ULONG len, void 
  */
 NTSTATUS WINAPI NtCallbackReturn( void *ret_ptr, ULONG ret_len, NTSTATUS status )
 {
-    struct user_callback_frame *frame = (struct user_callback_frame *)arm64_thread_data()->syscall_frame;
-
-    if (!frame->frame.prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
-
-    *frame->ret_ptr = ret_ptr;
-    *frame->ret_len = ret_len;
-    frame->status = status;
-    arm64_thread_data()->syscall_frame = frame->frame.prev_frame;
-    NtCurrentTeb()->Tib.ExceptionList = frame->teb_frame;
-    __wine_longjmp( &frame->jmpbuf, 1 );
+    if (!arm64_thread_data()->syscall_frame->prev_frame) return STATUS_NO_CALLBACK_ACTIVE;
+    user_mode_callback_return( ret_ptr, ret_len, status, NtCurrentTeb() );
 }
 
 
@@ -1127,7 +1526,6 @@ NTSTATUS WINAPI NtSetLdtEntries( ULONG sel1, LDT_ENTRY entry1, ULONG sel2, LDT_E
  */
 void signal_init_threading(void)
 {
-    pthread_key_create( &teb_key, NULL );
 }
 
 
@@ -1145,18 +1543,6 @@ NTSTATUS signal_alloc_thread( TEB *teb )
  */
 void signal_free_thread( TEB *teb )
 {
-}
-
-
-/**********************************************************************
- *		signal_init_thread
- */
-void signal_init_thread( TEB *teb )
-{
-    /* Win64/ARM applications expect the TEB pointer to be in the x18 platform register. */
-    __asm__ __volatile__( "mov x18, %0" : : "r" (teb) );
-
-    pthread_setspecific( teb_key, teb );
 }
 
 
@@ -1209,12 +1595,41 @@ void DECLSPEC_HIDDEN call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, B
     struct arm64_thread_data *thread_data = (struct arm64_thread_data *)&teb->GdiTebBatch;
     struct syscall_frame *frame = thread_data->syscall_frame;
     CONTEXT *ctx, context = { CONTEXT_ALL };
+    I386_CONTEXT *i386_context;
+    ARM_CONTEXT *arm_context;
 
     context.u.s.X0  = (DWORD64)entry;
     context.u.s.X1  = (DWORD64)arg;
     context.u.s.X18 = (DWORD64)teb;
     context.Sp      = (DWORD64)teb->Tib.StackBase;
     context.Pc      = (DWORD64)pRtlUserThreadStart;
+
+    if ((i386_context = get_cpu_area( IMAGE_FILE_MACHINE_I386 )))
+    {
+        i386_context->ContextFlags = CONTEXT_I386_ALL;
+        i386_context->Eax = (ULONG_PTR)entry;
+        i386_context->Ebx = (arg == peb ? get_wow_teb( teb )->Peb : (ULONG_PTR)arg);
+        i386_context->Esp = get_wow_teb( teb )->Tib.StackBase - 16;
+        i386_context->Eip = pLdrSystemDllInitBlock->pRtlUserThreadStart;
+        i386_context->SegCs = 0x23;
+        i386_context->SegDs = 0x2b;
+        i386_context->SegEs = 0x2b;
+        i386_context->SegFs = 0x53;
+        i386_context->SegGs = 0x2b;
+        i386_context->SegSs = 0x2b;
+        i386_context->EFlags = 0x202;
+        i386_context->FloatSave.ControlWord = 0x27f;
+        ((XSAVE_FORMAT *)i386_context->ExtendedRegisters)->MxCsr = 0x1f80;
+    }
+    else if ((arm_context = get_cpu_area( IMAGE_FILE_MACHINE_ARMNT )))
+    {
+        arm_context->ContextFlags = CONTEXT_ARM_ALL;
+        arm_context->R0 = (ULONG_PTR)entry;
+        arm_context->R1 = (arg == peb ? get_wow_teb( teb )->Peb : (ULONG_PTR)arg);
+        arm_context->Sp = get_wow_teb( teb )->Tib.StackBase;
+        arm_context->Pc = pLdrSystemDllInitBlock->pRtlUserThreadStart;
+        if (arm_context->Pc & 1) arm_context->Cpsr |= 0x20; /* thumb mode */
+    }
 
     if (suspend) wait_suspend( &context );
 
@@ -1341,7 +1756,8 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "ldr x16, [x16, x20, lsl 3]\n\t"
                    "blr x16\n\t"
                    "mov sp, x22\n"
-                   "3:\tldp x18, x19, [sp, #0x90]\n\t"
+                   __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") ":\n\t"
+                   "ldp x18, x19, [sp, #0x90]\n\t"
                    "ldp x20, x21, [sp, #0xa0]\n\t"
                    "ldp x22, x23, [sp, #0xb0]\n\t"
                    "ldp x24, x25, [sp, #0xc0]\n\t"
@@ -1385,12 +1801,51 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "ret x16\n"
                    "4:\tmov x0, #0xc0000000\n\t" /* STATUS_INVALID_PARAMETER */
                    "movk x0, #0x000d\n\t"
-                   "b 3b\n\t"
+                   "b " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
                    ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
                    __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
                    "mov sp, x0\n\t"
                    "mov x0, x1\n\t"
-                   "b 3b" )
+                   "b " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") )
+
+
+/***********************************************************************
+ *           __wine_unix_call_dispatcher
+ */
+__ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+                   /* FIXME: use x18 directly instead */
+                   "stp x0, x1, [sp, #-32]!\n\t"
+                   "stp x2, x30,[sp, #16]\n\t"
+                   "bl " __ASM_NAME("NtCurrentTeb") "\n\t"
+                   "mov x18, x0\n\t"
+                   "ldp x2, x30,[sp, #16]\n\t"
+                   "ldp x0, x1, [sp], #32\n\t"
+
+                   "ldr x10, [x18, #0x2f8]\n\t" /* arm64_thread_data()->syscall_frame */
+                   "stp x18, x19, [x10, #0x90]\n\t"
+                   "stp x20, x21, [x10, #0xa0]\n\t"
+                   "stp x22, x23, [x10, #0xb0]\n\t"
+                   "stp x24, x25, [x10, #0xc0]\n\t"
+                   "stp x26, x27, [x10, #0xd0]\n\t"
+                   "stp x28, x29, [x10, #0xe0]\n\t"
+                   "stp q8,  q9,  [x10, #0x1b0]\n\t"
+                   "stp q10, q11, [x10, #0x1d0]\n\t"
+                   "stp q12, q13, [x10, #0x1f0]\n\t"
+                   "stp q14, q15, [x10, #0x210]\n\t"
+                   "mov x9, sp\n\t"
+                   "stp x30, x9, [x10, #0xf0]\n\t"
+                   "mrs x9, NZCV\n\t"
+                   "stp x30, x9, [x10, #0x100]\n\t"
+                   "mov sp, x10\n\t"
+                   "ldr x16, [x0, x1, lsl 3]\n\t"
+                   "mov x0, x2\n\t"             /* args */
+                   "blr x16\n\t"
+                   "ldr w16, [sp, #0x10c]\n\t"  /* frame->restore_flags */
+                   "cbnz w16, " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
+                   "ldr x18, [sp, #0x90]\n\t"
+                   "ldp x16, x17, [sp, #0xf8]\n\t"
+                   "mov sp, x16\n\t"
+                   "ret x17" )
 
 
 /***********************************************************************
@@ -1440,14 +1895,5 @@ __ASM_GLOBAL_FUNC( __wine_longjmp,
                    "ldp d14, d15, [x0, #0xb0]\n\t" /* jmp_buf->D[6-7] */
                    "mov x0, x1\n\t"                /* retval */
                    "ret" )
-
-
-/**********************************************************************
- *           NtCurrentTeb   (NTDLL.@)
- */
-TEB * WINAPI NtCurrentTeb(void)
-{
-    return pthread_getspecific( teb_key );
-}
 
 #endif  /* __aarch64__ */

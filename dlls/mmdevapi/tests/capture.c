@@ -184,9 +184,11 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
      * whereas GetCurrentPadding grows when input is not consumed. */
     hr = IAudioCaptureClient_GetNextPacketSize(acc, &next);
     ok(hr == S_OK, "IAudioCaptureClient_GetNextPacketSize returns %08lx\n", hr);
+    flaky_wine
     ok(next <  pad, "GetNextPacketSize %u vs. GCP %u\n", next, pad);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
     ok(next == frames, "GetNextPacketSize %u vs. GetBuffer %u\n", next, frames);
 
@@ -256,6 +258,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     }
 
     frames = period;
+    flaky_wine
     ok(next == frames, "GetNextPacketSize %u vs. GetDevicePeriod %u\n", next, frames);
 
     /* GetBufferSize is not a multiple of the period size! */
@@ -269,6 +272,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "GetCurrentPadding call returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
 
     trace("Overrun position %d pad %u flags %lx, amount of frames locked: %u\n",
@@ -296,13 +300,16 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "GetCurrentPadding call returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
 
     trace("Cont'ed position %d pad %u flags %lx, amount of frames locked: %u\n",
           hr==S_OK ? (UINT)pos : -1, pad, flags, frames);
 
     if(hr == S_OK){
+        flaky_wine
         ok(pos == sum, "Position %u expected %u\n", (UINT)pos, sum);
+        flaky_wine
         ok(!flags, "flags %lu\n", flags);
 
         hr = IAudioCaptureClient_ReleaseBuffer(acc, frames);
@@ -317,6 +324,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "Start on a stopped stream returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
 
     hr = IAudioClient_GetCurrentPadding(ac, &pad);
@@ -324,9 +332,11 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
 
     trace("Restart position %d pad %u flags %lx, amount of frames locked: %u\n",
           hr==S_OK ? (UINT)pos : -1, pad, flags, frames);
+    flaky_wine
     ok(pad > sum, "restarted GCP %u\n", pad); /* GCP is still near buffer size */
 
     if(frames){
+        flaky_wine
         ok(pos == sum, "Position %u expected %u\n", (UINT)pos, sum);
         ok(!flags, "flags %lu\n", flags);
 
@@ -366,6 +376,7 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
     ok(hr == S_OK, "GetCurrentPadding call returns %08lx\n", hr);
 
     hr = IAudioCaptureClient_GetBuffer(acc, &data, &frames, &flags, &pos, &qpc);
+    flaky_wine
     ok(hr == S_OK, "Valid IAudioCaptureClient_GetBuffer returns %08lx\n", hr);
     trace("Running position %d pad %u flags %lx, amount of frames locked: %u\n",
           SUCCEEDED(hr) ? (UINT)pos : -1, pad, flags, frames);

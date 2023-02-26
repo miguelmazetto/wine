@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2022-06-09 03:15+0800\n"
+"PO-Revision-Date: 2022-10-17 16:35+0800\n"
 "Last-Translator: Chilung Chan <eason066@gmail.com>\n"
 "Language-Team: Chinese (Taiwan)\n"
 "Language: zh_TW\n"
@@ -771,7 +771,7 @@ msgstr "全字拼寫須符合(&W)"
 msgid "Match &Case"
 msgstr "大小寫視為相異(&C)"
 
-#: dlls/comdlg32/comdlg32.rc:325 dlls/joy.cpl/joy.rc:76
+#: dlls/comdlg32/comdlg32.rc:325
 msgid "Direction"
 msgstr "方向"
 
@@ -1321,10 +1321,8 @@ msgid "Options"
 msgstr "選項"
 
 #: dlls/compstui/compstui.rc:31
-#, fuzzy
-#| msgid "Defaults"
 msgid "Default"
-msgstr "預設"
+msgstr "預設值"
 
 #: dlls/credui/credui.rc:45
 msgid "&User name:"
@@ -3665,6 +3663,18 @@ msgstr "稍高"
 msgid "High"
 msgstr "高"
 
+#: dlls/ir50_32/ir50_32.rc:28
+#, fuzzy
+#| msgid "Index"
+msgid "Indeo5"
+msgstr "索引"
+
+#: dlls/ir50_32/ir50_32.rc:29
+#, fuzzy
+#| msgid "Wine Video 1 video codec"
+msgid "Indeo Video Interactive version 5 video codec"
+msgstr "Wine 視訊 1 視訊編碼解碼器"
+
 #: dlls/joy.cpl/joy.rc:37
 msgid "Joysticks"
 msgstr "搖桿"
@@ -3704,28 +3714,91 @@ msgid ""
 msgstr "停用或啟用裝置之後，已連接的搖桿將無法更新，直到您重新啟動這個程式。"
 
 #: dlls/joy.cpl/joy.rc:55
-msgid "Test Joystick"
-msgstr "測試搖桿"
+msgid "DInput"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:59
+msgid "Axes"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:60
+msgid "POVs"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:61
 msgid "Buttons"
 msgstr "按鈕"
 
-#: dlls/joy.cpl/joy.rc:68
-msgid "Test Force Feedback"
+#: dlls/joy.cpl/joy.rc:62
+#, fuzzy
+#| msgid "Test Force Feedback"
+msgid "Force Feedback Effect"
 msgstr "測試應力回饋"
 
-#: dlls/joy.cpl/joy.rc:72
-msgid "Available Effects"
-msgstr "可用效果"
-
-#: dlls/joy.cpl/joy.rc:74
+#: dlls/joy.cpl/joy.rc:64
 msgid ""
 "Press any button in the controller to activate the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "請按下控制器中的任何按鈕以啟用所選的效果。效果的方向可以利用控制器的軸向來變"
 "更。"
+
+#: dlls/joy.cpl/joy.rc:70
+msgid "XInput"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:73
+#, fuzzy
+#| msgid "User"
+msgid "User #0"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:74
+#, fuzzy
+#| msgid "User"
+msgid "User #1"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:75
+#, fuzzy
+#| msgid "User"
+msgid "User #2"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:76
+#, fuzzy
+#| msgid "User"
+msgid "User #3"
+msgstr "使用者"
+
+#: dlls/joy.cpl/joy.rc:78
+msgid ""
+"No user detected on slot #0, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:82
+msgid ""
+"No user detected on slot #1, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:86
+msgid ""
+"No user detected on slot #2, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:90
+msgid ""
+"No user detected on slot #3, make sure your gamepad is plugged in, and not "
+"overridden for DInput in the Joysticks tab."
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:95 dlls/joy.cpl/joy.rc:96 dlls/joy.cpl/joy.rc:97
+#: dlls/joy.cpl/joy.rc:98
+msgid "Rumble"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"
@@ -3961,11 +4034,11 @@ msgstr "'this' 不是一個 | 物件"
 msgid "Property cannot have both accessors and a value"
 msgstr "屬性不可同時有存取子和值"
 
-#: include/wine/wine_common_ver.rc:133
+#: include/wine/wine_common_ver.rc:138
 msgid "Wine kernel DLL"
 msgstr "Wine 核心 DLL"
 
-#: include/wine/wine_common_ver.rc:138 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
 msgid "Wine"
 msgstr "Wine"
@@ -12474,10 +12547,6 @@ msgstr "紙張大小(&Z):"
 msgid "Duplex:"
 msgstr "雙面:"
 
-#: dlls/wineps.drv/wineps.rc:50
-msgid "Setup"
-msgstr "設定"
-
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
 msgstr "Realm"
@@ -14913,10 +14982,8 @@ msgid "&Replace...\tCtrl+H"
 msgstr "取代(&R)...\tCtrl+H"
 
 #: programs/notepad/notepad.rc:59
-#, fuzzy
-#| msgid "&New...\tCtrl+N"
 msgid "&Go To...\tCtrl+G"
-msgstr "新增(&N)...\tCtrl+N"
+msgstr "移至(&G)...\tCtrl+G"
 
 #: programs/notepad/notepad.rc:63 programs/oleview/oleview.rc:68
 #: programs/oleview/oleview.rc:90 programs/winefile/winefile.rc:67
@@ -14959,17 +15026,15 @@ msgstr "上(&T):"
 
 #: programs/notepad/notepad.rc:132
 msgid "Go To Line"
-msgstr ""
+msgstr "移至行"
 
 #: programs/notepad/notepad.rc:134
-#, fuzzy
-#| msgid "CRL Number"
 msgid "&Line Number:"
-msgstr "CRL 號碼"
+msgstr "行號(&L):"
 
 #: programs/notepad/notepad.rc:137
 msgid "Go To"
-msgstr ""
+msgstr "移至"
 
 #: programs/notepad/notepad.rc:145
 msgid "Encoding:"
@@ -15035,7 +15100,7 @@ msgstr "Z"
 #: programs/notepad/notepad.rc:162
 msgctxt "accelerator GoTo"
 msgid "G"
-msgstr ""
+msgstr "G"
 
 #: programs/notepad/notepad.rc:74
 msgid "Page &p"
@@ -15112,7 +15177,7 @@ msgstr ""
 
 #: programs/notepad/notepad.rc:90
 msgid "Ln %ld, Col %ld"
-msgstr ""
+msgstr "第 %ld 列，第 %ld 行"
 
 #: programs/oleview/oleview.rc:32
 msgid "&Bind to file..."
@@ -15719,56 +15784,6 @@ msgstr ""
 "\n"
 
 #: programs/reg/reg.rc:67
-#, fuzzy
-#| msgid ""
-#| "REG ADD <key> [/v value_name | /ve] [/t type] [/s separator] [/d data] [/"
-#| "f]\n"
-#| "\n"
-#| "  Adds a key to the registry or adds a new value to a given registry "
-#| "key.\n"
-#| "\n"
-#| "  <key>\n"
-#| "     The registry key to add or, if either [/v] or [/ve] is specified,\n"
-#| "     the key in which to add the new registry data.\n"
-#| "\n"
-#| "     Format: ROOT\\Subkey\n"
-#| "\n"
-#| "     ROOT: A predefined registry key. This must be one of the following:\n"
-#| "\n"
-#| "         HKEY_LOCAL_MACHINE  | HKLM\n"
-#| "         HKEY_CURRENT_USER   | HKCU\n"
-#| "         HKEY_CLASSES_ROOT   | HKCR\n"
-#| "         HKEY_USERS          | HKU\n"
-#| "         HKEY_CURRENT_CONFIG | HKCC\n"
-#| "\n"
-#| "     Subkey: The full path to a registry key under a given ROOT key.\n"
-#| "\n"
-#| "  /v <value_name>\n"
-#| "     The name of the registry value to add.\n"
-#| "\n"
-#| "  /ve\n"
-#| "     Add an unnamed registry value. This option modifies the (Default)\n"
-#| "     registry value.\n"
-#| "\n"
-#| "  /t <type>\n"
-#| "     The type of data to add to the registry. If [/t] is specified,\n"
-#| "     <type> must be one of the following:\n"
-#| "\n"
-#| "         REG_SZ    | REG_MULTI_SZ | REG_EXPAND_SZ\n"
-#| "         REG_DWORD | REG_BINARY   | REG_NONE\n"
-#| "\n"
-#| "     If [/t] is not specified, the default data type is REG_SZ.\n"
-#| "\n"
-#| "  /s <separator>\n"
-#| "     The character used to separate strings in REG_MULTI_SZ data.\n"
-#| "     If [/s] is not specified, the default separator is \\0.\n"
-#| "\n"
-#| "  /d <data>\n"
-#| "     The data to add to the new registry value.\n"
-#| "\n"
-#| "  /f\n"
-#| "     Modify the registry without prompting for confirmation.\n"
-#| "\n"
 msgid ""
 "REG ADD <key> [/v value_name | /ve] [/t type] [/s separator] [/d data] [/f]\n"
 "\n"
@@ -15849,7 +15864,7 @@ msgstr ""
 "     <類型> 必須是下列的其中一個:\n"
 "\n"
 "         REG_SZ    | REG_MULTI_SZ | REG_EXPAND_SZ\n"
-"         REG_DWORD | REG_BINARY   | REG_NONE\n"
+"         REG_DWORD | REG_QWORD    | REG_BINARY   | REG_NONE\n"
 "\n"
 "     如果未指定 [/t]，資料類型將預設為 REG_SZ。\n"
 "\n"
@@ -16288,10 +16303,8 @@ msgstr "DWORD 值(&D)"
 
 #: programs/regedit/regedit.rc:52 programs/regedit/regedit.rc:105
 #: programs/regedit/regedit.rc:128
-#, fuzzy
-#| msgid "&DWORD Value"
 msgid "&QWORD Value"
-msgstr "DWORD 值(&D)"
+msgstr "QWORD 值(&Q)"
 
 #: programs/regedit/regedit.rc:53 programs/regedit/regedit.rc:106
 #: programs/regedit/regedit.rc:129
@@ -16840,16 +16853,12 @@ msgid "Collapse"
 msgstr "摺疊"
 
 #: programs/regedit/regedit.rc:178
-#, fuzzy
-#| msgid "Adds a new 32-bit value"
 msgid "Adds a new 64-bit value"
-msgstr "新增一個新的 32 位元值"
+msgstr "新增一個新的 64 位元值"
 
 #: programs/regedit/regedit.rc:221
-#, fuzzy
-#| msgid "Edit DWORD"
 msgid "Edit QWORD"
-msgstr "編輯 DWORD"
+msgstr "編輯 QWORD"
 
 #: programs/regsvr32/regsvr32.rc:33
 msgid ""

@@ -3874,7 +3874,7 @@ static BOOL WINAPI CRYPT_AsnDecodeCertPolicyConstraints(
 
 struct DECODED_RSA_PUB_KEY
 {
-    DWORD              pubexp;
+    CRYPT_INTEGER_BLOB pubexp;
     CRYPT_INTEGER_BLOB modulus;
 };
 
@@ -3893,12 +3893,23 @@ static BOOL CRYPT_raw_decode_rsa_pub_key(struct DECODED_RSA_PUB_KEY **decodedKey
        FALSE, TRUE, offsetof(struct DECODED_RSA_PUB_KEY, modulus.pbData),
        0 },
      { ASN_INTEGER, offsetof(struct DECODED_RSA_PUB_KEY, pubexp),
-       CRYPT_AsnDecodeIntInternal, sizeof(DWORD), FALSE, FALSE, 0, 0 },
+       CRYPT_AsnDecodeUnsignedIntegerInternal, sizeof(CRYPT_INTEGER_BLOB),
+       FALSE, TRUE, offsetof(struct DECODED_RSA_PUB_KEY, pubexp.pbData),
+       0 },
     };
 
     ret = CRYPT_AsnDecodeSequence(items, ARRAY_SIZE(items),
      pbEncoded, cbEncoded, CRYPT_DECODE_ALLOC_FLAG, NULL, decodedKey,
      size, NULL, NULL);
+
+    if (ret && (*decodedKey)->pubexp.cbData > sizeof(DWORD))
+    {
+        WARN("Unexpected exponent length %lu.\n", (*decodedKey)->pubexp.cbData);
+        LocalFree(*decodedKey);
+        SetLastError(CRYPT_E_ASN1_LARGE);
+        ret = FALSE;
+    }
+
     return ret;
 }
 
@@ -3920,7 +3931,7 @@ static BOOL WINAPI CRYPT_AsnDecodeRsaPubKey_Bcrypt(DWORD dwCertEncodingType,
         if (ret)
         {
             /* Header, exponent, and modulus */
-            DWORD bytesNeeded = sizeof(BCRYPT_RSAKEY_BLOB) + sizeof(DWORD) +
+            DWORD bytesNeeded = sizeof(BCRYPT_RSAKEY_BLOB) + decodedKey->pubexp.cbData +
              decodedKey->modulus.cbData;
 
             if (!pvStructInfo)
@@ -3939,7 +3950,7 @@ static BOOL WINAPI CRYPT_AsnDecodeRsaPubKey_Bcrypt(DWORD dwCertEncodingType,
                 hdr = pvStructInfo;
                 hdr->Magic = BCRYPT_RSAPUBLIC_MAGIC;
                 hdr->BitLength = decodedKey->modulus.cbData * 8;
-                hdr->cbPublicExp = sizeof(DWORD);
+                hdr->cbPublicExp = decodedKey->pubexp.cbData;
                 hdr->cbModulus = decodedKey->modulus.cbData;
                 hdr->cbPrime1 = 0;
                 hdr->cbPrime2 = 0;
@@ -3947,9 +3958,9 @@ static BOOL WINAPI CRYPT_AsnDecodeRsaPubKey_Bcrypt(DWORD dwCertEncodingType,
                  * in big-endian format, so we need to convert from little-endian
                  */
                 CRYPT_CopyReversed((BYTE *)pvStructInfo + sizeof(BCRYPT_RSAKEY_BLOB),
-                 (BYTE *)&decodedKey->pubexp, sizeof(DWORD));
+                 decodedKey->pubexp.pbData, hdr->cbPublicExp);
                 CRYPT_CopyReversed((BYTE *)pvStructInfo + sizeof(BCRYPT_RSAKEY_BLOB) +
-                 sizeof(DWORD), decodedKey->modulus.pbData,
+                 hdr->cbPublicExp, decodedKey->modulus.pbData,
                  decodedKey->modulus.cbData);
             }
             LocalFree(decodedKey);
@@ -3984,13 +3995,13 @@ static BOOL WINAPI CRYPT_AsnDecodeRsaPubKey(DWORD dwCertEncodingType,
             if (!pvStructInfo)
             {
                 *pcbStructInfo = bytesNeeded;
-                ret = TRUE;
             }
             else if ((ret = CRYPT_DecodeEnsureSpace(dwFlags, pDecodePara,
              pvStructInfo, pcbStructInfo, bytesNeeded)))
             {
                 BLOBHEADER *hdr;
                 RSAPUBKEY *rsaPubKey;
+                unsigned int i;
 
                 if (dwFlags & CRYPT_DECODE_ALLOC_FLAG)
                     pvStructInfo = *(BYTE **)pvStructInfo;
@@ -4002,7 +4013,11 @@ static BOOL WINAPI CRYPT_AsnDecodeRsaPubKey(DWORD dwCertEncodingType,
                 rsaPubKey = (RSAPUBKEY *)((BYTE *)pvStructInfo +
                  sizeof(BLOBHEADER));
                 rsaPubKey->magic = RSA1_MAGIC;
-                rsaPubKey->pubexp = decodedKey->pubexp;
+                rsaPubKey->pubexp = 0;
+                assert(decodedKey->pubexp.cbData <= sizeof(rsaPubKey->pubexp));
+                for (i = 0; i < decodedKey->pubexp.cbData; ++i)
+                    rsaPubKey->pubexp |= decodedKey->pubexp.pbData[i] << (i * 8);
+
                 rsaPubKey->bitlen = decodedKey->modulus.cbData * 8;
                 memcpy((BYTE *)pvStructInfo + sizeof(BLOBHEADER) +
                  sizeof(RSAPUBKEY), decodedKey->modulus.pbData,
@@ -6506,13 +6521,13 @@ static BOOL CRYPT_AsnDecodeOCSPBasicResponseEntriesArray(const BYTE *pbEncoded,
      dwFlags, NULL, pvStructInfo, pcbStructInfo, pcbDecoded);
 }
 
-static BOOL CRYPT_AsnDecodeResponderID(const BYTE *pbEncoded,
+static BOOL CRYPT_AsnDecodeResponderIDByName(const BYTE *pbEncoded,
  DWORD cbEncoded, DWORD dwFlags, void *pvStructInfo, DWORD *pcbStructInfo,
  DWORD *pcbDecoded)
 {
     OCSP_BASIC_RESPONSE_INFO *info = pvStructInfo;
-    BYTE tag = pbEncoded[0] & ~3, choice = pbEncoded[0] & 3;
-    DWORD decodedLen, dataLen, lenBytes, bytesNeeded = sizeof(*info), len;
+    DWORD dataLen, decodedLen, lenBytes, bytesNeeded = sizeof(*info);
+    BYTE tag = pbEncoded[0] & ~3;
     CERT_NAME_BLOB *blob;
 
     if (tag != (ASN_CONTEXT | ASN_CONSTRUCTOR))
@@ -6521,15 +6536,78 @@ static BOOL CRYPT_AsnDecodeResponderID(const BYTE *pbEncoded,
         SetLastError(CRYPT_E_ASN1_BADTAG);
         return FALSE;
     }
-    if (choice > 2)
+
+    if (!CRYPT_GetLen(pbEncoded, cbEncoded, &dataLen))
+        return FALSE;
+    lenBytes = GET_LEN_BYTES(pbEncoded[1]);
+    cbEncoded -= 1 + lenBytes;
+
+    if (dataLen > cbEncoded)
     {
-        WARN("Unexpected choice %02x\n", choice);
-        SetLastError(CRYPT_E_ASN1_CORRUPT);
+        SetLastError(CRYPT_E_ASN1_EOD);
+        return FALSE;
+    }
+    pbEncoded += 1 + lenBytes;
+    decodedLen = 1 + lenBytes + dataLen;
+
+    if (pbEncoded[0] != ASN_SEQUENCE)
+    {
+        WARN("Unexpected tag %02x %02x\n", pbEncoded[0], pbEncoded[1]);
+        SetLastError(CRYPT_E_ASN1_BADTAG);
         return FALSE;
     }
 
+    if (!(dwFlags & CRYPT_DECODE_NOCOPY_FLAG)) bytesNeeded += dataLen;
     if (pvStructInfo && *pcbStructInfo >= bytesNeeded)
-        info->dwResponderIdChoice = choice;
+    {
+        info->dwResponderIdChoice = 1;
+
+        blob = &info->u.ByNameResponderId;
+        blob->cbData = dataLen;
+        if (dwFlags & CRYPT_DECODE_NOCOPY_FLAG)
+            blob->pbData = (BYTE *)pbEncoded;
+        else if (blob->cbData)
+        {
+            blob->pbData = (BYTE *)(info + 1);
+            memcpy(blob->pbData, pbEncoded, blob->cbData);
+        }
+    }
+
+    if (pcbDecoded)
+        *pcbDecoded = decodedLen;
+
+    if (!pvStructInfo)
+    {
+        *pcbStructInfo = bytesNeeded;
+        return TRUE;
+    }
+
+    if (*pcbStructInfo < bytesNeeded)
+    {
+        SetLastError(ERROR_MORE_DATA);
+        *pcbStructInfo = bytesNeeded;
+        return FALSE;
+    }
+
+    *pcbStructInfo = bytesNeeded;
+    return TRUE;
+}
+
+static BOOL CRYPT_AsnDecodeResponderIDByKey(const BYTE *pbEncoded,
+ DWORD cbEncoded, DWORD dwFlags, void *pvStructInfo, DWORD *pcbStructInfo,
+ DWORD *pcbDecoded)
+{
+    OCSP_BASIC_RESPONSE_INFO *info = pvStructInfo;
+    DWORD dataLen, decodedLen, lenBytes, bytesNeeded = sizeof(*info), len;
+    BYTE tag = pbEncoded[0] & ~3;
+    CRYPT_HASH_BLOB *blob;
+
+    if (tag != (ASN_CONTEXT | ASN_CONSTRUCTOR))
+    {
+        WARN("Unexpected tag %02x\n", tag);
+        SetLastError(CRYPT_E_ASN1_BADTAG);
+        return FALSE;
+    }
 
     if (!CRYPT_GetLen(pbEncoded, cbEncoded, &dataLen))
         return FALSE;
@@ -6566,7 +6644,8 @@ static BOOL CRYPT_AsnDecodeResponderID(const BYTE *pbEncoded,
     if (!(dwFlags & CRYPT_DECODE_NOCOPY_FLAG)) bytesNeeded += len;
     if (pvStructInfo && *pcbStructInfo >= bytesNeeded)
     {
-        blob = &info->u.ByNameResponderId;
+        info->dwResponderIdChoice = 2;
+        blob = &info->u.ByKeyResponderId;
         blob->cbData = len;
         if (dwFlags & CRYPT_DECODE_NOCOPY_FLAG)
             blob->pbData = (BYTE *)pbEncoded;
@@ -6595,6 +6674,28 @@ static BOOL CRYPT_AsnDecodeResponderID(const BYTE *pbEncoded,
 
     *pcbStructInfo = bytesNeeded;
     return TRUE;
+}
+
+static BOOL CRYPT_AsnDecodeResponderID(const BYTE *pbEncoded,
+ DWORD cbEncoded, DWORD dwFlags, void *pvStructInfo, DWORD *pcbStructInfo,
+ DWORD *pcbDecoded)
+{
+    BYTE choice = pbEncoded[0] & 3;
+
+    TRACE("choice %02x\n", choice);
+    switch (choice)
+    {
+    case 1:
+        return CRYPT_AsnDecodeResponderIDByName(pbEncoded, cbEncoded, dwFlags,
+                pvStructInfo, pcbStructInfo, pcbDecoded);
+    case 2:
+        return CRYPT_AsnDecodeResponderIDByKey(pbEncoded, cbEncoded, dwFlags,
+                pvStructInfo, pcbStructInfo, pcbDecoded);
+    default:
+        WARN("Unexpected choice %02x\n", choice);
+        SetLastError(CRYPT_E_ASN1_CORRUPT);
+        return FALSE;
+    }
 }
 
 static BOOL WINAPI CRYPT_AsnDecodeOCSPBasicResponse(DWORD dwCertEncodingType,
@@ -6790,7 +6891,7 @@ static CryptDecodeObjectExFunc CRYPT_GetBuiltinDecoder(DWORD dwCertEncodingType,
             decodeFunc = CRYPT_AsnDecodeOCSPBasicResponse;
             break;
         default:
-            FIXME("Unimplemented decoder for lpszStructType OID %d\n", LOWORD(lpszStructType));
+            break;
         }
     }
     else if (!strcmp(lpszStructType, szOID_CERT_EXTENSIONS))
@@ -6847,8 +6948,6 @@ static CryptDecodeObjectExFunc CRYPT_GetBuiltinDecoder(DWORD dwCertEncodingType,
         decodeFunc = CRYPT_AsnDecodeCTL;
     else if (!strcmp(lpszStructType, szOID_ECC_PUBLIC_KEY))
         decodeFunc = CRYPT_AsnDecodeObjectIdentifier;
-    else
-        FIXME("Unsupported decoder for lpszStructType %s\n", lpszStructType);
     return decodeFunc;
 }
 
@@ -6927,6 +7026,13 @@ BOOL WINAPI CryptDecodeObjectEx(DWORD dwCertEncodingType, LPCSTR lpszStructType,
          debugstr_a(lpszStructType));
         decodeFunc = CRYPT_LoadDecoderExFunc(dwCertEncodingType, lpszStructType,
          &hFunc);
+        if (!decodeFunc)
+        {
+            if (IS_INTOID(lpszStructType))
+                FIXME("Unimplemented decoder for lpszStructType OID %d\n", LOWORD(lpszStructType));
+            else
+                FIXME("Unsupported decoder for lpszStructType %s\n", lpszStructType);
+        }
     }
     if (decodeFunc)
         ret = decodeFunc(dwCertEncodingType, lpszStructType, pbEncoded,

@@ -25,7 +25,7 @@
 #include "winuser.h"
 #include "wingdi.h"
 #include "imm.h"
-#include "ddk/imm.h"
+#include "immdev.h"
 
 BOOL WINAPI ImmSetActiveContext(HWND, HIMC, BOOL);
 
@@ -92,12 +92,6 @@ typedef struct
         HARDWAREINPUT   hi;
     } u;
 } TEST_INPUT;
-
-typedef struct _tagTRANSMSG {
-    UINT message;
-    WPARAM wParam;
-    LPARAM lParam;
-} TRANSMSG, *LPTRANSMSG;
 
 static UINT (WINAPI *pSendInput) (UINT, INPUT*, size_t);
 
@@ -984,6 +978,14 @@ static void test_ImmThreads(void)
     rc = ImmSetCompositionFontA(threadinfo.u_himc, &lf);
     ok(rc == 0, "ImmSetCompositionFont should fail\n");
 
+    /* CompositionString */
+    rc = ImmSetCompositionStringA(himc, SCS_SETSTR, "a", 2, NULL, 0);
+    ok(rc, "failed.\n");
+    rc = ImmSetCompositionStringA(otherHimc, SCS_SETSTR, "a", 2, NULL, 0);
+    ok(!rc, "should fail.\n");
+    rc = ImmSetCompositionStringA(threadinfo.u_himc, SCS_SETSTR, "a", 2, NULL, 0);
+    ok(!rc, "should fail.\n");
+
     /* CompositionWindow */
     rc = ImmSetCompositionWindow(himc, &cf);
     ok(rc != 0, "ImmSetCompositionWindow failed\n");
@@ -1348,6 +1350,7 @@ static DWORD WINAPI test_default_ime_window_cb(void *arg)
        broken(!testcase->top_level_window /* Vista */) ,
        "Expected IME window existence\n");
     DestroyWindow(hwnd1);
+    flaky
     ok(!IsWindow(ime_wnd), "Expected no IME windows\n");
     return 1;
 }
@@ -1411,24 +1414,29 @@ static DWORD WINAPI test_default_ime_with_message_only_window_cb(void *arg)
 {
     HWND hwnd1, hwnd2, default_ime_wnd;
 
+    /* Message-only window doesn't create associated IME window. */
     test_phase = PHASE_UNKNOWN;
     hwnd1 = CreateWindowA(wndcls, "Wine imm32.dll test",
                           WS_OVERLAPPEDWINDOW,
                           CW_USEDEFAULT, CW_USEDEFAULT,
                           240, 120, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
     default_ime_wnd = ImmGetDefaultIMEWnd(hwnd1);
-    ok(!IsWindow(default_ime_wnd), "Expected no IME windows, got %p\n", default_ime_wnd);
+    ok(!default_ime_wnd, "Expected no IME windows, got %p\n", default_ime_wnd);
 
+    /* Setting message-only window as owner at creation,
+       doesn't create associated IME window. */
     hwnd2 = CreateWindowA(wndcls, "Wine imm32.dll test",
                           WS_OVERLAPPEDWINDOW,
                           CW_USEDEFAULT, CW_USEDEFAULT,
                           240, 120, hwnd1, NULL, GetModuleHandleW(NULL), NULL);
     default_ime_wnd = ImmGetDefaultIMEWnd(hwnd2);
-    ok(IsWindow(default_ime_wnd), "Expected IME window existence\n");
+    todo_wine ok(!default_ime_wnd || broken(IsWindow(default_ime_wnd)), "Expected no IME windows, got %p\n", default_ime_wnd);
 
     DestroyWindow(hwnd2);
     DestroyWindow(hwnd1);
 
+    /* Making window message-only after creation,
+       doesn't disassociate IME window. */
     hwnd1 = CreateWindowA(wndcls, "Wine imm32.dll test",
                           WS_OVERLAPPEDWINDOW,
                           CW_USEDEFAULT, CW_USEDEFAULT,

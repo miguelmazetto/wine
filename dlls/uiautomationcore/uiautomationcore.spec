@@ -1,5 +1,5 @@
 @ stdcall -private DllCanUnloadNow()
-@ stub DllGetClassObject
+@ stdcall -private DllGetClassObject(ptr ptr ptr)
 @ stdcall -private DllRegisterServer()
 @ stdcall -private DllUnregisterServer()
 @ stub DockPattern_SetDockPosition
@@ -53,13 +53,13 @@
 @ stub TransformPattern_Move
 @ stub TransformPattern_Resize
 @ stub TransformPattern_Rotate
-@ stub UiaAddEvent
+@ stdcall UiaAddEvent(ptr long ptr long ptr long ptr ptr)
 @ stdcall UiaClientsAreListening()
 #@ stub UiaDisconnectAllProviders
 @ stdcall UiaDisconnectProvider(ptr)
-@ stub UiaEventAddWindow
-@ stub UiaEventRemoveWindow
-@ stub UiaFind
+@ stdcall UiaEventAddWindow(ptr long)
+@ stdcall UiaEventRemoveWindow(ptr long)
+@ stdcall UiaFind(ptr ptr ptr ptr ptr ptr)
 @ stub UiaGetErrorDescription
 @ stub UiaGetPatternProvider
 @ stdcall UiaGetPropertyValue(ptr long ptr)
@@ -67,7 +67,7 @@
 @ stdcall UiaGetReservedNotSupportedValue(ptr)
 @ stub UiaGetRootNode
 @ stdcall UiaGetRuntimeId(ptr ptr)
-@ stub UiaGetUpdatedCache
+@ stdcall UiaGetUpdatedCache(ptr ptr long ptr ptr ptr)
 @ stub UiaHPatternObjectFromVariant
 @ stub UiaHTextRangeFromVariant
 @ stdcall UiaHUiaNodeFromVariant(ptr ptr)
@@ -75,7 +75,7 @@
 @ stdcall UiaHostProviderFromHwnd(long ptr)
 #@ stub UiaIAccessibleFromProvider
 @ stdcall UiaLookupId(long ptr)
-@ stub UiaNavigate
+@ stdcall UiaNavigate(ptr long ptr ptr ptr ptr)
 @ stub UiaNodeFromFocus
 @ stdcall UiaNodeFromHandle(long ptr)
 @ stub UiaNodeFromPoint
@@ -84,15 +84,15 @@
 @ stub UiaPatternRelease
 #@ stub UiaProviderForNonClient
 @ stdcall UiaProviderFromIAccessible(ptr long long ptr)
-@ stub UiaRaiseAsyncContentLoadedEvent
+@ stdcall UiaRaiseAsyncContentLoadedEvent(ptr long double)
 @ stdcall UiaRaiseAutomationEvent(ptr long)
 @ stdcall UiaRaiseAutomationPropertyChangedEvent(ptr long int128 int128)
-#@ stub UiaRaiseChangesEvent
-#@ stub UiaRaiseNotificationEvent
-@ stub UiaRaiseStructureChangedEvent
-#@ stub UiaRaiseTextEditTextChangedEvent
+@ stdcall UiaRaiseChangesEvent(ptr long ptr)
+@ stdcall UiaRaiseNotificationEvent(ptr long long wstr wstr)
+@ stdcall UiaRaiseStructureChangedEvent(ptr long ptr long)
+@ stdcall UiaRaiseTextEditTextChangedEvent(ptr long ptr)
 @ stdcall UiaRegisterProviderCallback(ptr)
-@ stub UiaRemoveEvent
+@ stdcall UiaRemoveEvent(ptr)
 @ stdcall UiaReturnRawElementProvider(long long long ptr)
 @ stub UiaSetFocus
 @ stub UiaTextRangeRelease

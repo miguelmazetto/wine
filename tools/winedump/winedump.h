@@ -135,12 +135,14 @@ typedef struct __globals
   const char *uc_dll_name;       /* -o */
 
   /* Option arguments: dump mode */
-  const char *dumpsect;    /* -j */
+  const char **dumpsect;   /* -j */
 } _globals;
 
 extern _globals globals;
 extern void *dump_base;
 extern size_t dump_total_len;
+
+BOOL globals_dump_sect(const char*);
 
 /* Names to use for output DLL */
 #define OUTPUT_DLL_NAME \
@@ -214,7 +216,7 @@ const char *get_machine_str(int mach);
 
 /* file dumping functions */
 enum FileSig {SIG_UNKNOWN, SIG_DOS, SIG_PE, SIG_DBG, SIG_PDB, SIG_NE, SIG_LE, SIG_MDMP, SIG_COFFLIB, SIG_LNK,
-              SIG_EMF, SIG_MF, SIG_FNT, SIG_TLB, SIG_NLS};
+              SIG_EMF, SIG_EMFSPOOL, SIG_MF, SIG_FNT, SIG_TLB, SIG_NLS};
 
 const void*	PRD(unsigned long prd, unsigned long len);
 unsigned long	Offset(const void* ptr);
@@ -230,9 +232,10 @@ const char*     get_guid_str(const GUID* guid);
 const char*     get_unicode_str( const WCHAR *str, int len );
 const char*     get_symbol_str(const char* symname);
 void            print_fake_dll(void);
-void            dump_file_header(const IMAGE_FILE_HEADER *);
+void            dump_file_header(const IMAGE_FILE_HEADER *, BOOL);
 void            dump_optional_header(const IMAGE_OPTIONAL_HEADER32 *, UINT);
 void            dump_section(const IMAGE_SECTION_HEADER *, const char* strtable);
+void            dump_section_characteristics(DWORD characteristics, const char* sep);
 
 enum FileSig    get_kind_exec(void);
 void            dos_dump( void );
@@ -248,7 +251,10 @@ void	        dbg_dump( void );
 enum FileSig    get_kind_lnk(void);
 void	        lnk_dump( void );
 enum FileSig    get_kind_emf(void);
+unsigned long   dump_emfrecord(const char *pfx, unsigned long offset);
 void            emf_dump( void );
+enum FileSig    get_kind_emfspool(void);
+void            emfspool_dump(void);
 enum FileSig    get_kind_mf(void);
 void            mf_dump(void);
 enum FileSig    get_kind_pdb(void);

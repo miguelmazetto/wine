@@ -252,8 +252,8 @@ static HRESULT WINAPI HTMLOptionElement_put_text(IHTMLOptionElement *iface, BSTR
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(!This->element.node.doc->nsdoc) {
-        WARN("NULL nsdoc\n");
+    if(!This->element.node.doc->dom_document) {
+        WARN("NULL dom_document\n");
         return E_UNEXPECTED;
     }
 
@@ -275,7 +275,7 @@ static HRESULT WINAPI HTMLOptionElement_put_text(IHTMLOptionElement *iface, BSTR
     }
 
     nsAString_InitDepend(&text_str, v);
-    nsres = nsIDOMHTMLDocument_CreateTextNode(This->element.node.doc->nsdoc, &text_str, &text_node);
+    nsres = nsIDOMDocument_CreateTextNode(This->element.node.doc->dom_document, &text_str, &text_node);
     nsAString_Finish(&text_str);
     if(NS_FAILED(nsres)) {
         ERR("CreateTextNode failed: %08lx\n", nsres);
@@ -396,6 +396,7 @@ static const NodeImplVtbl HTMLOptionElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
@@ -429,7 +430,7 @@ HRESULT HTMLOptionElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     HTMLOptionElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLOptionElement));
+    ret = calloc(1, sizeof(HTMLOptionElement));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -494,7 +495,7 @@ static ULONG WINAPI HTMLOptionElementFactory_Release(IHTMLOptionElementFactory *
 
     if(!ref) {
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -645,14 +646,13 @@ static dispex_static_data_t HTMLOptionElementFactory_dispex = {
     &HTMLOptionElementFactory_dispex_vtbl,
     IHTMLOptionElementFactory_tid,
     HTMLOptionElementFactory_iface_tids,
-    HTMLElement_init_dispex_info
 };
 
 HRESULT HTMLOptionElementFactory_Create(HTMLInnerWindow *window, HTMLOptionElementFactory **ret_ptr)
 {
     HTMLOptionElementFactory *ret;
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -768,7 +768,7 @@ static ULONG WINAPI HTMLSelectElementEnum_Release(IEnumVARIANT *iface)
 
     if(!ref) {
         IHTMLSelectElement_Release(&This->elem->IHTMLSelectElement_iface);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -1260,7 +1260,7 @@ static HRESULT WINAPI HTMLSelectElement_get__newEnum(IHTMLSelectElement *iface, 
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1473,6 +1473,7 @@ static const NodeImplVtbl HTMLSelectElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
@@ -1507,7 +1508,7 @@ HRESULT HTMLSelectElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     HTMLSelectElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLSelectElement));
+    ret = calloc(1, sizeof(HTMLSelectElement));
     if(!ret)
         return E_OUTOFMEMORY;
 

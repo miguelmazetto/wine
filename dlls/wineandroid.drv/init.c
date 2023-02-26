@@ -262,9 +262,9 @@ static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
 /***********************************************************************
  *           ANDROID_ChangeDisplaySettings
  */
-LONG ANDROID_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG ANDROID_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
-    FIXME( "(%p,%p,0x%08x,%p)\n", displays, hwnd, flags, lpvoid );
+    FIXME( "(%p,%s,%p,0x%08x,%p)\n", displays, debugstr_w(primary_name), hwnd, (int)flags, lpvoid );
     return DISP_CHANGE_SUCCESSFUL;
 }
 
@@ -306,7 +306,7 @@ BOOL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
 /***********************************************************************
  *           ANDROID_GetCurrentDisplaySettings
  */
-BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW devmode )
+BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode )
 {
     devmode->u2.dmDisplayFlags = 0;
     devmode->u1.s2.dmPosition.x = 0;
@@ -320,8 +320,8 @@ BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW devmode )
     devmode->dmFields = DM_POSITION | DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT |
                         DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
     TRACE( "current mode -- %dx%d %d bpp @%d Hz\n",
-           devmode->dmPelsWidth, devmode->dmPelsHeight,
-           devmode->dmBitsPerPel, devmode->dmDisplayFrequency );
+           (int)devmode->dmPelsWidth, (int)devmode->dmPelsHeight,
+           (int)devmode->dmBitsPerPel, (int)devmode->dmDisplayFrequency );
     return TRUE;
 }
 
@@ -352,7 +352,7 @@ static const struct user_driver_funcs android_drv_funcs =
     .pCreateWindow = ANDROID_CreateWindow,
     .pDesktopWindowProc = ANDROID_DesktopWindowProc,
     .pDestroyWindow = ANDROID_DestroyWindow,
-    .pMsgWaitForMultipleObjectsEx = ANDROID_MsgWaitForMultipleObjectsEx,
+    .pProcessEvents = ANDROID_ProcessEvents,
     .pSetCapture = ANDROID_SetCapture,
     .pSetLayeredWindowAttributes = ANDROID_SetLayeredWindowAttributes,
     .pSetParent = ANDROID_SetParent,

@@ -17,11 +17,14 @@
  */
 
 typedef enum {
+    EVENTID_INVALID_ID = -1,
     EVENTID_DOMCONTENTLOADED,
     EVENTID_ABORT,
+    EVENTID_AFTERPRINT,
     EVENTID_ANIMATIONEND,
     EVENTID_ANIMATIONSTART,
     EVENTID_BEFOREACTIVATE,
+    EVENTID_BEFOREPRINT,
     EVENTID_BEFOREUNLOAD,
     EVENTID_BLUR,
     EVENTID_CHANGE,
@@ -51,6 +54,8 @@ typedef enum {
     EVENTID_MOUSEUP,
     EVENTID_MOUSEWHEEL,
     EVENTID_MSTHUMBNAILCLICK,
+    EVENTID_PAGEHIDE,
+    EVENTID_PAGESHOW,
     EVENTID_PASTE,
     EVENTID_PROGRESS,
     EVENTID_READYSTATECHANGE,
@@ -63,6 +68,7 @@ typedef enum {
     EVENTID_SUBMIT,
     EVENTID_TIMEOUT,
     EVENTID_UNLOAD,
+    EVENTID_VISIBILITYCHANGE,
     EVENTID_LAST
 } eventid_t;
 
@@ -114,7 +120,7 @@ HRESULT create_document_event(HTMLDocumentNode*,eventid_t,DOMEvent**) DECLSPEC_H
 HRESULT create_document_event_str(HTMLDocumentNode*,const WCHAR*,IDOMEvent**) DECLSPEC_HIDDEN;
 HRESULT create_event_from_nsevent(nsIDOMEvent*,compat_mode_t,DOMEvent**) DECLSPEC_HIDDEN;
 HRESULT create_message_event(HTMLDocumentNode*,VARIANT*,DOMEvent**) DECLSPEC_HIDDEN;
-HRESULT create_storage_event(HTMLDocumentNode*,BSTR,BSTR,BSTR,BOOL,DOMEvent**) DECLSPEC_HIDDEN;
+HRESULT create_storage_event(HTMLDocumentNode*,BSTR,BSTR,BSTR,const WCHAR*,BOOL,DOMEvent**) DECLSPEC_HIDDEN;
 
 void init_nsevents(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 void release_nsevents(HTMLDocumentNode*) DECLSPEC_HIDDEN;
@@ -126,6 +132,7 @@ typedef struct {
     dispex_static_data_vtbl_t dispex_vtbl;
     nsISupports *(*get_gecko_target)(DispatchEx*);
     void (*bind_event)(DispatchEx*,eventid_t);
+    HRESULT (*dispatch_nsevent_hook)(DispatchEx*,DOMEvent*);
     EventTarget *(*get_parent_event_target)(DispatchEx*);
     HRESULT (*handle_event_default)(DispatchEx*,eventid_t,nsIDOMEvent*,BOOL*);
     ConnectionPointContainer *(*get_cp_container)(DispatchEx*);
@@ -149,12 +156,12 @@ static inline HRESULT get_node_event(HTMLDOMNode *node, eventid_t eid, VARIANT *
     return get_event_handler(get_node_event_prop_target(node, eid), eid, var);
 }
 
-static inline HRESULT set_doc_event(HTMLDocument *doc, eventid_t eid, VARIANT *var)
+static inline HRESULT set_doc_event(HTMLDocumentNode *doc, eventid_t eid, VARIANT *var)
 {
-    return set_event_handler(&doc->doc_node->node.event_target, eid, var);
+    return set_event_handler(&doc->node.event_target, eid, var);
 }
 
-static inline HRESULT get_doc_event(HTMLDocument *doc, eventid_t eid, VARIANT *var)
+static inline HRESULT get_doc_event(HTMLDocumentNode *doc, eventid_t eid, VARIANT *var)
 {
-    return get_event_handler(&doc->doc_node->node.event_target, eid, var);
+    return get_event_handler(&doc->node.event_target, eid, var);
 }

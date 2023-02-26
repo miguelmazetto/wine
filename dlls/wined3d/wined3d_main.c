@@ -30,6 +30,7 @@
 #include <vkd3d.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DECLARE_DEBUG_CHANNEL(vkd3d);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 struct wined3d_wndproc
@@ -128,7 +129,7 @@ struct wined3d_settings wined3d_settings =
     .shader_backend = WINED3D_SHADER_BACKEND_AUTO,
 };
 
-struct wined3d * CDECL wined3d_create(DWORD flags)
+struct wined3d * CDECL wined3d_create(uint32_t flags)
 {
     struct wined3d *object;
     HRESULT hr;
@@ -144,7 +145,7 @@ struct wined3d * CDECL wined3d_create(DWORD flags)
 
     if (FAILED(hr = wined3d_init(object, flags)))
     {
-        WARN("Failed to initialize wined3d object, hr %#x.\n", hr);
+        WARN("Failed to initialize wined3d object, hr %#lx.\n", hr);
         heap_free(object);
         return NULL;
     }
@@ -202,7 +203,7 @@ static DWORD get_config_key(HKEY defkey, HKEY appkey, const char *env, const cha
     return ERROR_FILE_NOT_FOUND;
 }
 
-static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *env, const char *name, DWORD *value)
+static DWORD get_config_key_dword(HKEY defkey, HKEY appkey, const char *env, const char *name, unsigned int *value)
 {
     DWORD type, data, size;
     const char *env_value;
@@ -267,13 +268,13 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
     const char *env;
     HKEY hkey = 0;
     HKEY appkey = 0;
-    DWORD tmpvalue;
+    unsigned int tmpvalue;
     WNDCLASSA wc;
 
     wined3d_context_tls_idx = TlsAlloc();
     if (wined3d_context_tls_idx == TLS_OUT_OF_INDEXES)
     {
-        DWORD err = GetLastError();
+        unsigned int err = GetLastError();
         ERR("Failed to allocate context TLS index, err %#x.\n", err);
         return FALSE;
     }
@@ -298,7 +299,7 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
         ERR("Failed to register window class 'WineD3D_OpenGL'!\n");
         if (!TlsFree(wined3d_context_tls_idx))
         {
-            DWORD err = GetLastError();
+            unsigned int err = GetLastError();
             ERR("Failed to free context TLS index, err %#x.\n", err);
         }
         return FALSE;
@@ -471,6 +472,23 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
     if (appkey) RegCloseKey( appkey );
     if (hkey) RegCloseKey( hkey );
 
+    if (!getenv( "VKD3D_DEBUG" ))
+    {
+        if (TRACE_ON(vkd3d)) putenv( "VKD3D_DEBUG=trace" );
+        else if (WARN_ON(vkd3d)) putenv( "VKD3D_DEBUG=warn" );
+        else if (FIXME_ON(vkd3d)) putenv( "VKD3D_DEBUG=fixme" );
+        else if (ERR_ON(vkd3d)) putenv( "VKD3D_DEBUG=err" );
+        else putenv( "VKD3D_DEBUG=none" );
+    }
+    if (!getenv( "VKD3D_SHADER_DEBUG" ))
+    {
+        if (TRACE_ON(vkd3d)) putenv( "VKD3D_SHADER_DEBUG=trace" );
+        else if (WARN_ON(vkd3d)) putenv( "VKD3D_SHADER_DEBUG=warn" );
+        else if (FIXME_ON(vkd3d)) putenv( "VKD3D_SHADER_DEBUG=fixme" );
+        else if (ERR_ON(vkd3d)) putenv( "VKD3D_SHADER_DEBUG=err" );
+        else putenv( "VKD3D_SHADER_DEBUG=none" );
+    }
+
     vkd3d_set_log_callback(vkd3d_log_callback);
 
     return TRUE;
@@ -483,7 +501,7 @@ static BOOL wined3d_dll_destroy(HINSTANCE hInstDLL)
 
     if (!TlsFree(wined3d_context_tls_idx))
     {
-        DWORD err = GetLastError();
+        unsigned int err = GetLastError();
         ERR("Failed to free context TLS index, err %#x.\n", err);
     }
 
@@ -551,7 +569,7 @@ static struct wined3d_output * wined3d_get_output_from_window(const struct wined
     monitor_info.cbSize = sizeof(monitor_info);
     if (!GetMonitorInfoW(monitor, (MONITORINFO *)&monitor_info))
     {
-        ERR("GetMonitorInfoW failed, error %#x.\n", GetLastError());
+        ERR("GetMonitorInfoW failed, error %#lx.\n", GetLastError());
         return NULL;
     }
 
@@ -630,7 +648,7 @@ static LRESULT CALLBACK wined3d_wndproc(HWND window, UINT message, WPARAM wparam
     {
         if (filter && message != WM_DISPLAYCHANGE)
         {
-            TRACE("Filtering message: window %p, message %#x, wparam %#lx, lparam %#lx.\n",
+            TRACE("Filtering message: window %p, message %#x, wparam %#Ix, lparam %#Ix.\n",
                     window, message, wparam, lparam);
 
             if (unicode)

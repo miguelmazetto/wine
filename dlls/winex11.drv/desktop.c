@@ -123,13 +123,9 @@ BOOL is_virtual_desktop(void)
 }
 
 /* Virtual desktop display settings handler */
-static BOOL X11DRV_desktop_get_id( const WCHAR *device_name, ULONG_PTR *id )
+static BOOL X11DRV_desktop_get_id( const WCHAR *device_name, BOOL is_primary, ULONG_PTR *id )
 {
-    WCHAR primary_adapter[CCHDEVICENAME];
-
-    if (!get_primary_adapter( primary_adapter ) || wcsicmp( primary_adapter, device_name ))
-        return FALSE;
-
+    if (!is_primary) return FALSE;
     *id = 0;
     return TRUE;
 }
@@ -221,7 +217,8 @@ static BOOL X11DRV_desktop_get_current_mode( ULONG_PTR id, DEVMODEW *mode )
 static LONG X11DRV_desktop_set_current_mode( ULONG_PTR id, const DEVMODEW *mode )
 {
     if (mode->dmFields & DM_BITSPERPEL && mode->dmBitsPerPel != screen_bpp)
-        WARN("Cannot change screen color depth from %dbits to %dbits!\n", screen_bpp, mode->dmBitsPerPel);
+        WARN("Cannot change screen color depth from %dbits to %dbits!\n",
+             screen_bpp, (int)mode->dmBitsPerPel);
 
     desktop_width = mode->dmPelsWidth;
     desktop_height = mode->dmPelsHeight;
@@ -290,15 +287,11 @@ static void X11DRV_desktop_free_adapters( struct gdi_adapter *adapters )
 
 static BOOL X11DRV_desktop_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count )
 {
-    static const WCHAR generic_nonpnp_monitorW[] = {
-        'G','e','n','e','r','i','c',' ',
-        'N','o','n','-','P','n','P',' ','M','o','n','i','t','o','r',0};
     struct gdi_monitor *monitor;
 
     monitor = calloc( 1, sizeof(*monitor) );
     if (!monitor) return FALSE;
 
-    lstrcpyW( monitor->name, generic_nonpnp_monitorW );
     SetRect( &monitor->rc_monitor, 0, 0, desktop_width, desktop_height );
     SetRect( &monitor->rc_work, 0, 0, desktop_width, desktop_height );
     query_desktop_work_area( &monitor->rc_work );
@@ -456,6 +449,8 @@ static void update_desktop_fullscreen( unsigned int width, unsigned int height)
  */
 void X11DRV_resize_desktop(void)
 {
+    static RECT old_virtual_rect;
+
     RECT primary_rect, virtual_rect;
     HWND hwnd = NtUserGetDesktopWindow();
     INT width, height;
@@ -465,17 +460,19 @@ void X11DRV_resize_desktop(void)
     width = primary_rect.right;
     height = primary_rect.bottom;
 
-    if (NtUserGetWindowThread( hwnd, NULL ) != GetCurrentThreadId())
-    {
-        send_message( hwnd, WM_X11DRV_RESIZE_DESKTOP, 0, 0 );
-    }
-    else
-    {
-        TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
-        update_desktop_fullscreen( width, height );
-        NtUserSetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
-                            virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
-                            SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
-        ungrab_clipping_window();
-    }
+    TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
+    update_desktop_fullscreen( width, height );
+    NtUserSetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top,
+                        virtual_rect.right - virtual_rect.left, virtual_rect.bottom - virtual_rect.top,
+                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
+    ungrab_clipping_window();
+
+    if (old_virtual_rect.left != virtual_rect.left || old_virtual_rect.top != virtual_rect.top)
+        send_message_timeout( HWND_BROADCAST, WM_X11DRV_DESKTOP_RESIZED, old_virtual_rect.left,
+                              old_virtual_rect.top, SMTO_ABORTIFHUNG, 2000, FALSE );
+
+    /* forward clip_fullscreen_window request to the foreground window */
+    send_notify_message( NtUserGetForegroundWindow(), WM_X11DRV_CLIP_CURSOR_REQUEST, TRUE, TRUE );
+
+    old_virtual_rect = virtual_rect;
 }

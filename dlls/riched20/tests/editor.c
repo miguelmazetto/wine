@@ -110,6 +110,22 @@ static HWND new_richeditW(HWND parent) {
   return new_windowW(RICHEDIT_CLASS20W, ES_MULTILINE, parent);
 }
 
+static WNDCLASSA make_simple_class(WNDPROC wndproc, LPCSTR lpClassName)
+{
+    WNDCLASSA cls;
+    cls.style = 0;
+    cls.lpfnWndProc = wndproc;
+    cls.cbClsExtra = 0;
+    cls.cbWndExtra = 0;
+    cls.hInstance = GetModuleHandleA(0);
+    cls.hIcon = 0;
+    cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
+    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
+    cls.lpszMenuName = NULL;
+    cls.lpszClassName = lpClassName;
+    return cls;
+}
+
 /* Keeps the window reponsive for the deley_time in seconds.
  * This is useful for debugging a test to see what is happening. */
 static void keep_responsive(time_t delay_time)
@@ -1389,10 +1405,48 @@ static void test_EM_SETCHARFORMAT(void)
   DestroyWindow(hwndRichEdit);
 }
 
+/* As the clipboard is a shared resource, it happens (on Windows) that the WM_PASTE
+ * is a no-op; likely because another app has opened the clipboard for inspection.
+ * In this case, WM_PASTE does nothing, and doesn't return an error code.
+ * So retry pasting a couple of times.
+ * Don't use this function if the paste operation shouldn't change the content of the
+ * editor (clipboard is empty without selection, edit control is read only...).
+ * Also impact on undo stack is not managed.
+ */
+#define send_paste(a) _send_paste(__LINE__, (a))
+static void _send_paste(unsigned int line, HWND wnd)
+{
+    int retries;
+
+    SendMessageA(wnd, EM_SETMODIFY, FALSE, 0);
+
+    for (retries = 0; retries < 7; retries++)
+    {
+        if (retries) Sleep(15);
+        SendMessageA(wnd, WM_PASTE, 0, 0);
+        if (SendMessageA(wnd, EM_GETMODIFY, 0, 0)) return;
+    }
+    ok_(__FILE__, line)(0, "Failed to paste clipboard content\n");
+    {
+        char classname[256];
+        HWND clipwnd = GetOpenClipboardWindow();
+        /* Provide a hint as to the source of interference:
+         * - The class name would typically be CLIPBRDWNDCLASS if the
+         *   clipboard was opened by a Windows application using the
+         *   ole32 API.
+         * - And it would be __wine_clipboard_manager if it was opened in
+         *   response to a native application.
+         */
+        GetClassNameA(clipwnd, classname, ARRAY_SIZE(classname));
+        trace("%p (%s) opened the clipboard\n", clipwnd, classname);
+    }
+}
+
 static void test_EM_SETTEXTMODE(void)
 {
   HWND hwndRichEdit = new_richedit(NULL);
   CHARFORMAT2A cf2, cf2test;
+  unsigned int len;
   CHARRANGE cr;
   int rc = 0;
 
@@ -1462,7 +1516,10 @@ static void test_EM_SETTEXTMODE(void)
   SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
 
   /*Paste the italicized "wine" into the control*/
-  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+  send_paste(hwndRichEdit);
+
+  len = SendMessageA(hwndRichEdit, WM_GETTEXTLENGTH, 0, 0);
+  ok(len == 8 /*winewine*/, "Unexpected text length %u\n", len);
 
   /*Select a character from the first "wine" string*/
   cr.cpMin = 2;
@@ -1505,7 +1562,7 @@ static void test_EM_SETTEXTMODE(void)
   SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
 
   /*Paste italicized "wine" into the control*/
-  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+  send_paste(hwndRichEdit);
 
   /*Select text from the first "wine" string*/
   cr.cpMin = 1;
@@ -1651,7 +1708,7 @@ static void test_TM_PLAINTEXT(void)
   /*Paste the plain text "wine" string, which should take the insert
    formatting, which at the moment is bold italics*/
 
-  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+  send_paste(hwndRichEdit);
 
   /*Select the first "wine" string and retrieve its formatting*/
 
@@ -4070,16 +4127,7 @@ static void test_EM_SETTEXTEX(void)
    * For some reason the scroll position is 0 after EM_SETTEXTEX
    * with the ST_SELECTION flag only when the control has a parent
    * window, even though the selection is at the end. */
-  cls.style = 0;
-  cls.lpfnWndProc = DefWindowProcA;
-  cls.cbClsExtra = 0;
-  cls.cbWndExtra = 0;
-  cls.hInstance = GetModuleHandleA(0);
-  cls.hIcon = 0;
-  cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
-  cls.hbrBackground = GetStockObject(WHITE_BRUSH);
-  cls.lpszMenuName = NULL;
-  cls.lpszClassName = "ParentTestClass";
+  cls = make_simple_class(DefWindowProcA, "ParentTestClass");
   if(!RegisterClassA(&cls)) assert(0);
 
   parent = CreateWindowA(cls.lpszClassName, NULL, WS_POPUP|WS_VISIBLE,
@@ -4743,6 +4791,36 @@ static DWORD CALLBACK test_EM_GETMODIFY_esCallback(DWORD_PTR dwCookie,
   return 0;
 }
 
+#define open_clipboard(hwnd) open_clipboard_(__LINE__, hwnd)
+static BOOL open_clipboard_(int line, HWND hwnd)
+{
+    DWORD start = GetTickCount();
+    while (1)
+    {
+        BOOL ret = OpenClipboard(hwnd);
+        if (ret || GetLastError() != ERROR_ACCESS_DENIED)
+            return ret;
+        if (GetTickCount() - start > 100)
+        {
+            char classname[256];
+            DWORD le = GetLastError();
+            HWND clipwnd = GetOpenClipboardWindow();
+            /* Provide a hint as to the source of interference:
+             * - The class name would typically be CLIPBRDWNDCLASS if the
+             *   clipboard was opened by a Windows application using the
+             *   ole32 API.
+             * - And it would be __wine_clipboard_manager if it was opened in
+             *   response to a native application.
+             */
+            GetClassNameA(clipwnd, classname, ARRAY_SIZE(classname));
+            trace_(__FILE__, line)("%p (%s) opened the clipboard\n", clipwnd, classname);
+            SetLastError(le);
+            return ret;
+        }
+        Sleep(15);
+    }
+}
+
 static void test_EM_GETMODIFY(void)
 {
   HWND hwndRichEdit = new_richedit(NULL);
@@ -4759,6 +4837,8 @@ static void test_EM_GETMODIFY(void)
   CHARFORMAT2A cf2;
   PARAFORMAT2 pf2;
   EDITSTREAM es;
+  BOOL r;
+  HANDLE hclip;
   
   HFONT testFont = CreateFontA (0,0,0,0,FW_LIGHT, 0, 0, 0, ANSI_CHARSET, 
     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | 
@@ -4840,7 +4920,7 @@ static void test_EM_GETMODIFY(void)
   SendMessageA(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
   SendMessageA(hwndRichEdit, EM_SETSEL, 0, 2);
   SendMessageA(hwndRichEdit, WM_COPY, 0, 0);
-  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+  send_paste(hwndRichEdit);
   result = SendMessageA(hwndRichEdit, EM_GETMODIFY, 0, 0);
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero when pasting identical text\n");
@@ -4850,7 +4930,7 @@ static void test_EM_GETMODIFY(void)
   SendMessageA(hwndRichEdit, EM_SETSEL, 0, 2);
   SendMessageA(hwndRichEdit, WM_COPY, 0, 0);
   SendMessageA(hwndRichEdit, EM_SETSEL, 0, 3);
-  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+  send_paste(hwndRichEdit);
   result = SendMessageA(hwndRichEdit, EM_GETMODIFY, 0, 0);
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero when pasting different text\n");
@@ -4905,7 +4985,28 @@ static void test_EM_GETMODIFY(void)
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero for EM_STREAM\n");
 
+  /* Check that the clipboard data is still available after destroying the
+   * editor window.
+   */
+  SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"Stayin' alive");
+  SendMessageA(hwndRichEdit, EM_SETSEL, 8, -1);
+  SendMessageA(hwndRichEdit, WM_COPY, 0, 0);
+
   DestroyWindow(hwndRichEdit);
+
+  r = open_clipboard(NULL);
+  ok(r, "OpenClipboard failed le=%lu\n", GetLastError());
+
+  hclip = GetClipboardData(CF_TEXT);
+  todo_wine ok(hclip != NULL, "GetClipboardData() failed le=%lu\n", GetLastError());
+  if (hclip)
+  {
+      const char* str = GlobalLock(hclip);
+      ok(strcmp(str, "alive") == 0, "unexpected clipboard content: %s\n", str);
+      GlobalUnlock(hclip);
+  }
+
+  CloseClipboard();
 }
 
 struct exsetsel_s {
@@ -5550,7 +5651,7 @@ static void test_WM_PASTE(void)
                 (MapVirtualKeyA('C', MAPVK_VK_TO_VSC) << 16) | 1);
     release_key(VK_CONTROL);
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, 0);
-    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+    send_paste(hwndRichEdit);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     result = strcmp(buffer,"testing");
     ok(result == 0,
@@ -5571,7 +5672,7 @@ static void test_WM_PASTE(void)
     ok(result == 0,
         "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, 0);
-    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+    send_paste(hwndRichEdit);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     result = strcmp(buffer,"cut\r\n");
     ok(result == 0,
@@ -5621,7 +5722,7 @@ static void test_WM_PASTE(void)
 
     /* Paste multi-line text into single-line control */
     hwndRichEdit = new_richedit_with_style(NULL, 0);
-    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
+    send_paste(hwndRichEdit);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     result = strcmp(buffer, "testing paste");
     ok(result == 0,
@@ -5683,6 +5784,7 @@ static void test_EM_FORMATRANGE(void)
     SIZE stringsize;
     int len;
 
+    winetest_push_context("%d", i);
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)fmtstrings[i].string);
 
     gtl.flags = GTL_NUMCHARS | GTL_PRECISE;
@@ -5739,6 +5841,7 @@ static void test_EM_FORMATRANGE(void)
     todo_wine {
     ok(r == len, "Expected %d, got %d\n", len, r);
     }
+    winetest_pop_context();
   }
 
   ReleaseDC(NULL, hdc);
@@ -5870,6 +5973,7 @@ static void test_EM_STREAMIN(void)
   char buffer[1024] = {0}, tmp[16];
   CHARRANGE range;
   PARAFORMAT2 fmt;
+  DWORD len;
 
   const char * streamText0 = "{\\rtf1\\fi100\\li200\\rtlpar\\qr TestSomeText}";
   const char * streamText0a = "{\\rtf1\\fi100\\li200\\rtlpar\\qr TestSomeText\\par}";
@@ -6077,12 +6181,12 @@ static void test_EM_STREAMIN(void)
   result = SendMessageA(hwndRichEdit, EM_STREAMIN, SF_TEXT, (LPARAM)&es);
   ok(result == 8, "got %Id\n", result);
 
-  WideCharToMultiByte(CP_ACP, 0, UTF8Split_exp, -1, tmp, sizeof(tmp), NULL, NULL);
+  len = WideCharToMultiByte(CP_ACP, 0, UTF8Split_exp, -1, tmp, sizeof(tmp), NULL, NULL);
 
   result = SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-  ok(result  == 3,
+  ok(result + 1 == len,
       "EM_STREAMIN: Test UTF8Split returned %Id\n", result);
-  result = memcmp (buffer, tmp, 3);
+  result = memcmp (buffer, tmp, result);
   ok(result  == 0,
       "EM_STREAMIN: Test UTF8Split set wrong text: Result: %s\n",buffer);
   ok(es.dwError == 0, "EM_STREAMIN: Test UTF8Split set error %ld, expected %d\n", es.dwError, 0);
@@ -6599,16 +6703,7 @@ static void test_eventMask(void)
     int eventMask;
 
     /* register class to capture WM_COMMAND */
-    cls.style = 0;
-    cls.lpfnWndProc = ParentMsgCheckProcA;
-    cls.cbClsExtra = 0;
-    cls.cbWndExtra = 0;
-    cls.hInstance = GetModuleHandleA(0);
-    cls.hIcon = 0;
-    cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
-    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
-    cls.lpszMenuName = NULL;
-    cls.lpszClassName = "EventMaskParentClass";
+    cls = make_simple_class(ParentMsgCheckProcA, "EventMaskParentClass");
     if(!RegisterClassA(&cls)) assert(0);
 
     parent = CreateWindowA(cls.lpszClassName, NULL, WS_POPUP|WS_VISIBLE,
@@ -6692,16 +6787,7 @@ static void test_WM_NOTIFY(void)
     int sel_start, sel_end;
 
     /* register class to capture WM_NOTIFY */
-    cls.style = 0;
-    cls.lpfnWndProc = WM_NOTIFY_ParentMsgCheckProcA;
-    cls.cbClsExtra = 0;
-    cls.cbWndExtra = 0;
-    cls.hInstance = GetModuleHandleA(0);
-    cls.hIcon = 0;
-    cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
-    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
-    cls.lpszMenuName = NULL;
-    cls.lpszClassName = "WM_NOTIFY_ParentClass";
+    cls = make_simple_class(WM_NOTIFY_ParentMsgCheckProcA, "WM_NOTIFY_ParentClass");
     if(!RegisterClassA(&cls)) assert(0);
 
     parent = CreateWindowA(cls.lpszClassName, NULL, WS_POPUP|WS_VISIBLE,
@@ -6927,16 +7013,7 @@ static void test_EN_LINK(void)
     };
 
     /* register class to capture WM_NOTIFY */
-    cls.style = 0;
-    cls.lpfnWndProc = EN_LINK_ParentMsgCheckProcA;
-    cls.cbClsExtra = 0;
-    cls.cbWndExtra = 0;
-    cls.hInstance = GetModuleHandleA(0);
-    cls.hIcon = 0;
-    cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
-    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
-    cls.lpszMenuName = NULL;
-    cls.lpszClassName = "EN_LINK_ParentClass";
+    cls = make_simple_class(EN_LINK_ParentMsgCheckProcA, "EN_LINK_ParentClass");
     if(!RegisterClassA(&cls)) assert(0);
 
     parent = CreateWindowA(cls.lpszClassName, NULL, WS_POPUP|WS_VISIBLE,
@@ -7973,16 +8050,7 @@ static void test_dialogmode(void)
     int lcount, r;
     WNDCLASSA cls;
 
-    cls.style = 0;
-    cls.lpfnWndProc = dialog_mode_wnd_proc;
-    cls.cbClsExtra = 0;
-    cls.cbWndExtra = 0;
-    cls.hInstance = GetModuleHandleA(0);
-    cls.hIcon = 0;
-    cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
-    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
-    cls.lpszMenuName = NULL;
-    cls.lpszClassName = "DialogModeParentClass";
+    cls = make_simple_class(dialog_mode_wnd_proc, "DialogModeParentClass");
     if(!RegisterClassA(&cls)) assert(0);
 
     hwParent = CreateWindowA("DialogModeParentClass", NULL, WS_OVERLAPPEDWINDOW,
@@ -8942,6 +9010,47 @@ static void fill_reobject_struct(REOBJECT *reobj, LONG cp, LPOLEOBJECT poleobj,
     reobj->dwUser = user;
 }
 
+static BOOL change_received = FALSE;
+
+static LRESULT WINAPI ChangeWatcherWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message == WM_COMMAND && (wParam >> 16) == EN_CHANGE) change_received = TRUE;
+    return DefWindowProcA(hwnd, message, wParam, lParam);
+}
+
+static LRESULT WINAPI RichEditWithEventsWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message == WM_CREATE)
+        SendMessageA(hwnd, EM_SETEVENTMASK, 0, ENM_CHANGE);
+    return CallWindowProcA(richeditProc, hwnd, message, wParam, lParam);
+}
+
+static void test_init_messages(void)
+{
+    WNDCLASSA cls;
+    HWND parent, edit;
+
+    /* register class to capture EN_CHANGE */
+    cls = make_simple_class(ChangeWatcherWndProc, "ChangeWatcherClass");
+    if (!RegisterClassA(&cls)) assert(0);
+
+    /* and a class that sets ENM_CHANGE during WM_CREATE */
+    if (!GetClassInfoA(hmoduleRichEdit, RICHEDIT_CLASS20A, &cls)) return;
+    richeditProc = cls.lpfnWndProc;
+    cls.lpfnWndProc = RichEditWithEventsWndProc;
+    cls.lpszClassName = "RichEditWithEvents";
+    if (!RegisterClassA(&cls)) assert(0);
+
+    parent = CreateWindowA("ChangeWatcherClass", NULL, WS_POPUP|WS_VISIBLE,
+                          0, 0, 200, 60, NULL, NULL, NULL, NULL);
+    ok(parent != 0, "Failed to create parent window\n");
+    change_received = FALSE;
+    edit = new_window("RichEditWithEvents", 0, parent);
+    ok(change_received == FALSE, "Creating a RichEdit should not make any EN_CHANGE events\n");
+    DestroyWindow(edit);
+    DestroyWindow(parent);
+}
+
 static void test_EM_SELECTIONTYPE(void)
 {
     HWND hwnd = new_richedit(NULL);
@@ -9030,7 +9139,7 @@ static void test_window_classes(void)
     int i;
     HWND hwnd;
 
-    for (i = 0; i < sizeof(test)/sizeof(test[0]); i++)
+    for (i = 0; i < ARRAY_SIZE(test); i++)
     {
         SetLastError(0xdeadbeef);
         hwnd = CreateWindowExA(0, test[i].class, NULL, WS_POPUP, 0, 0, 0, 0, 0, 0, 0, NULL);
@@ -9120,6 +9229,7 @@ START_TEST( editor )
   test_background();
   test_eop_char_fmt();
   test_para_numbering();
+  test_init_messages();
   test_EM_SELECTIONTYPE();
 
   /* Set the environment variable WINETEST_RICHED20 to keep windows

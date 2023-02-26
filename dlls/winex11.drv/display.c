@@ -66,14 +66,9 @@ void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *new_handle
  * Default handlers if resolution switching is not enabled
  *
  */
-static BOOL nores_get_id(const WCHAR *device_name, ULONG_PTR *id)
+static BOOL nores_get_id(const WCHAR *device_name, BOOL is_primary, ULONG_PTR *id)
 {
-    WCHAR primary_adapter[CCHDEVICENAME];
-
-    if (!get_primary_adapter( primary_adapter ))
-        return FALSE;
-
-    *id = !wcsicmp( device_name, primary_adapter ) ? 1 : 0;
+    *id = is_primary ? 1 : 0;
     return TRUE;
 }
 
@@ -168,7 +163,7 @@ void init_registry_display_settings(void)
     DISPLAY_DEVICEW dd = {sizeof(dd)};
     UNICODE_STRING device_name;
     DWORD i = 0;
-    LONG ret;
+    int ret;
 
     while (!NtUserEnumDisplayDevices( NULL, i++, &dd, 0 ))
     {
@@ -185,8 +180,8 @@ void init_registry_display_settings(void)
         }
 
         TRACE("Device %s current display mode %ux%u %ubits %uHz at %d,%d.\n",
-              wine_dbgstr_w(dd.DeviceName), dm.dmPelsWidth, dm.dmPelsHeight, dm.dmBitsPerPel,
-              dm.dmDisplayFrequency, dm.dmPosition.x, dm.dmPosition.y);
+              wine_dbgstr_w(dd.DeviceName), (int)dm.dmPelsWidth, (int)dm.dmPelsHeight,
+              (int)dm.dmBitsPerPel, (int)dm.dmDisplayFrequency, (int)dm.dmPosition.x, (int)dm.dmPosition.y);
 
         ret = NtUserChangeDisplaySettings( &device_name, &dm, NULL,
                                            CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL );
@@ -194,24 +189,6 @@ void init_registry_display_settings(void)
             ERR("Failed to save registry display settings for %s, returned %d.\n",
                 wine_dbgstr_w(dd.DeviceName), ret);
     }
-}
-
-BOOL get_primary_adapter(WCHAR *name)
-{
-    DISPLAY_DEVICEW dd;
-    DWORD i;
-
-    dd.cb = sizeof(dd);
-    for (i = 0; !NtUserEnumDisplayDevices( NULL, i, &dd, 0 ); ++i)
-    {
-        if (dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
-        {
-            lstrcpyW(name, dd.DeviceName);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
 }
 
 static void set_display_depth(ULONG_PTR display_id, DWORD depth)
@@ -262,16 +239,26 @@ static DWORD get_display_depth(ULONG_PTR display_id)
     return screen_bpp;
 }
 
+INT X11DRV_GetDisplayDepth(LPCWSTR name, BOOL is_primary)
+{
+    ULONG_PTR id;
+
+    if (settings_handler.get_id( name, is_primary, &id ))
+        return get_display_depth( id );
+
+    return screen_bpp;
+}
+
 /***********************************************************************
  *      GetCurrentDisplaySettings  (X11DRV.@)
  *
  */
-BOOL X11DRV_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW devmode )
+BOOL X11DRV_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode )
 {
     DEVMODEW mode;
     ULONG_PTR id;
 
-    if (!settings_handler.get_id( name, &id ) || !settings_handler.get_current_mode( id, &mode ))
+    if (!settings_handler.get_id( name, is_primary, &id ) || !settings_handler.get_current_mode( id, &mode ))
     {
         ERR("Failed to get %s current display settings.\n", wine_dbgstr_w(name));
         return FALSE;
@@ -371,9 +358,9 @@ static LONG apply_display_settings( DEVMODEW *displays, ULONG_PTR *ids, BOOL do_
         TRACE("handler:%s changing %s to position:(%d,%d) resolution:%ux%u frequency:%uHz "
               "depth:%ubits orientation:%#x.\n", settings_handler.name,
               wine_dbgstr_w(mode->dmDeviceName),
-              full_mode->dmPosition.x, full_mode->dmPosition.y, full_mode->dmPelsWidth,
-              full_mode->dmPelsHeight, full_mode->dmDisplayFrequency, full_mode->dmBitsPerPel,
-              full_mode->dmDisplayOrientation);
+              (int)full_mode->dmPosition.x, (int)full_mode->dmPosition.y, (int)full_mode->dmPelsWidth,
+              (int)full_mode->dmPelsHeight, (int)full_mode->dmDisplayFrequency,
+              (int)full_mode->dmBitsPerPel, (int)full_mode->dmDisplayOrientation);
 
         ret = settings_handler.set_current_mode(*id, full_mode);
         if (attached_mode && ret == DISP_CHANGE_SUCCESSFUL)
@@ -390,7 +377,7 @@ static LONG apply_display_settings( DEVMODEW *displays, ULONG_PTR *ids, BOOL do_
  *      ChangeDisplaySettings  (X11DRV.@)
  *
  */
-LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
     INT left_most = INT_MAX, top_most = INT_MAX;
     LONG count, ret = DISP_CHANGE_BADPARAM;
@@ -409,7 +396,7 @@ LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, 
     if (!(ids = calloc( count, sizeof(*ids) ))) return DISP_CHANGE_FAILED;
     for (count = 0, mode = displays; mode->dmSize; mode = NEXT_DEVMODEW(mode), count++)
     {
-        if (!settings_handler.get_id( mode->dmDeviceName, ids + count )) goto done;
+        if (!settings_handler.get_id( mode->dmDeviceName, !wcsicmp( mode->dmDeviceName, primary_name ), ids + count )) goto done;
         mode->dmPosition.x -= left_most;
         mode->dmPosition.y -= top_most;
     }
@@ -418,8 +405,6 @@ LONG X11DRV_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd, DWORD flags, 
     ret = apply_display_settings( displays, ids, FALSE );
     if (ret == DISP_CHANGE_SUCCESSFUL)
         ret = apply_display_settings( displays, ids, TRUE );
-    if (ret == DISP_CHANGE_SUCCESSFUL)
-        X11DRV_DisplayDevices_Update();
 
 done:
     free( ids );
@@ -558,56 +543,10 @@ void X11DRV_DisplayDevices_RegisterEventHandlers(void)
         handler->register_event_handlers();
 }
 
-void X11DRV_DisplayDevices_Update(void)
+/* Report whether a display device handler supports detecting dynamic device changes */
+BOOL X11DRV_DisplayDevices_SupportEventHandlers(void)
 {
-    RECT old_virtual_rect, new_virtual_rect;
-    DWORD tid, pid;
-    HWND foreground;
-    UINT mask = 0, i;
-    HWND *list;
-
-    old_virtual_rect = NtUserGetVirtualScreenRect();
-    X11DRV_DisplayDevices_Init(TRUE);
-    new_virtual_rect = NtUserGetVirtualScreenRect();
-
-    /* Calculate XReconfigureWMWindow() mask */
-    if (old_virtual_rect.left != new_virtual_rect.left)
-        mask |= CWX;
-    if (old_virtual_rect.top != new_virtual_rect.top)
-        mask |= CWY;
-
-    X11DRV_resize_desktop();
-
-    list = build_hwnd_list();
-    for (i = 0; list && list[i] != HWND_BOTTOM; i++)
-    {
-        struct x11drv_win_data *data;
-
-        if (!(data = get_win_data( list[i] ))) continue;
-
-        /* update the full screen state */
-        update_net_wm_states(data);
-
-        if (mask && data->whole_window)
-        {
-            POINT pos = virtual_screen_to_root(data->whole_rect.left, data->whole_rect.top);
-            XWindowChanges changes;
-            changes.x = pos.x;
-            changes.y = pos.y;
-            XReconfigureWMWindow(data->display, data->whole_window, data->vis.screen, mask, &changes);
-        }
-        release_win_data(data);
-    }
-
-    free( list );
-
-    /* forward clip_fullscreen_window request to the foreground window */
-    if ((foreground = NtUserGetForegroundWindow()) &&
-        (tid = NtUserGetWindowThread( foreground, &pid )) && pid == GetCurrentProcessId())
-    {
-        if (tid == GetCurrentThreadId()) clip_fullscreen_window( foreground, TRUE );
-        else send_notify_message( foreground, WM_X11DRV_CLIP_CURSOR_REQUEST, TRUE, TRUE );
-    }
+    return !!host_handler.register_event_handlers;
 }
 
 static BOOL force_display_devices_refresh;
@@ -621,7 +560,7 @@ BOOL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
     INT gpu_count, adapter_count, monitor_count;
     INT gpu, adapter, monitor;
     DEVMODEW *modes, *mode;
-    DWORD mode_count;
+    UINT mode_count;
 
     if (!force && !force_display_devices_refresh) return TRUE;
     force_display_devices_refresh = FALSE;
@@ -650,10 +589,7 @@ BOOL X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
 
             /* Initialize monitors */
             for (monitor = 0; monitor < monitor_count; monitor++)
-            {
-                TRACE("monitor: %#x %s\n", monitor, wine_dbgstr_w(monitors[monitor].name));
                 device_manager->add_monitor( &monitors[monitor], param );
-            }
 
             handler->free_monitors(monitors, monitor_count);
 

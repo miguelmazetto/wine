@@ -668,9 +668,9 @@ static void sys_command_size_move( HWND hwnd, WPARAM wparam )
     DWORD msg_pos = NtUserGetThreadInfo()->message_pos;
     BOOL thickframe, drag_full_windows = TRUE, moved = FALSE;
     RECT sizing_rect, mouse_rect, orig_rect;
-    LONG hittest = wparam & 0x0f;
-    WPARAM syscommand = wparam & 0xfff0;
-    LONG style = get_window_long( hwnd, GWL_STYLE );
+    UINT hittest = wparam & 0x0f;
+    UINT syscommand = wparam & 0xfff0;
+    UINT style = get_window_long( hwnd, GWL_STYLE );
     POINT capture_point, pt;
     MINMAXINFO minmax;
     HMONITOR mon = 0;
@@ -688,8 +688,8 @@ static void sys_command_size_move( HWND hwnd, WPARAM wparam )
     capture_point = pt;
     NtUserClipCursor( NULL );
 
-    TRACE( "hwnd %p command %04lx, hittest %d, pos %d,%d\n",
-           hwnd, syscommand, hittest, pt.x, pt.y );
+    TRACE( "hwnd %p command %04x, hittest %d, pos %d,%d\n",
+           hwnd, syscommand, hittest, (int)pt.x, (int)pt.y );
 
     if (syscommand == SC_MOVE)
     {
@@ -946,7 +946,7 @@ static void track_nc_scroll_bar( HWND hwnd, WPARAM wparam, POINT pt )
 
 static LRESULT handle_sys_command( HWND hwnd, WPARAM wparam, LPARAM lparam )
 {
-    TRACE( "hwnd %p WM_SYSCOMMAND %lx %lx\n", hwnd, wparam, lparam );
+    TRACE( "hwnd %p WM_SYSCOMMAND %lx %lx\n", hwnd, (long)wparam, lparam );
 
     if (!is_window_enabled( hwnd )) return 0;
 
@@ -1007,7 +1007,7 @@ static LRESULT handle_sys_command( HWND hwnd, WPARAM wparam, LPARAM lparam )
     case SC_ARRANGE:
     case SC_NEXTWINDOW:
     case SC_PREVWINDOW:
-        FIXME( "unimplemented WM_SYSCOMMAND %04lx\n", wparam );
+        FIXME( "unimplemented WM_SYSCOMMAND %04lx\n", (long)wparam );
         break;
 
     default:
@@ -1292,7 +1292,7 @@ static BOOL draw_push_button( HDC dc, RECT *r, UINT flags )
     return TRUE;
 }
 
-BOOL draw_frame_caption( HDC dc, RECT *r, UINT flags )
+static BOOL draw_frame_caption( HDC dc, RECT *r, UINT flags )
 {
     RECT rect;
     int small_diam = make_square_rect( r, &rect ) - 2;
@@ -1349,6 +1349,22 @@ BOOL draw_frame_caption( HDC dc, RECT *r, UINT flags )
     NtGdiDeleteObjectApp( font );
 
     return TRUE;
+}
+
+BOOL draw_menu_button( HWND hwnd, HDC dc, RECT *r, enum NONCLIENT_BUTTON_TYPE type, BOOL down,
+                       BOOL grayed )
+{
+    struct draw_non_client_button_params params;
+    void *ret_ptr;
+    ULONG ret_len;
+
+    params.hwnd = hwnd;
+    params.hdc = dc;
+    params.type = type;
+    params.rect = *r;
+    params.down = down;
+    params.grayed = grayed;
+    return KeUserModeCallback( NtUserDrawNonClientButton, &params, sizeof(params), &ret_ptr, &ret_len );
 }
 
 BOOL draw_frame_menu( HDC dc, RECT *r, UINT flags )
@@ -1840,7 +1856,7 @@ static void handle_nc_calc_size( HWND hwnd, WPARAM wparam, RECT *win_rect )
         if (((style & (WS_CHILD | WS_POPUP)) != WS_CHILD) && get_menu( hwnd ))
         {
             TRACE( "getting menu bar height with hwnd %p, width %d, at (%d, %d)\n",
-                   hwnd, win_rect->right - win_rect->left, -rect.left, -rect.top );
+                   hwnd, (int)(win_rect->right - win_rect->left), (int)-rect.left, (int)-rect.top );
 
             win_rect->top += get_menu_bar_height( hwnd, win_rect->right - win_rect->left,
                                                   -rect.left, -rect.top );
@@ -1885,7 +1901,7 @@ LRESULT handle_nc_hit_test( HWND hwnd, POINT pt )
     RECT rect, client_rect;
     DWORD style, ex_style;
 
-    TRACE( "hwnd %p pt %d,%d\n", hwnd, pt.x, pt.y );
+    TRACE( "hwnd %p pt %d,%d\n", hwnd, (int)pt.x, (int)pt.y );
 
     get_window_rects( hwnd, COORDS_SCREEN, &rect, &client_rect, get_thread_dpi() );
     if (!PtInRect( &rect, pt )) return HTNOWHERE;
@@ -2051,7 +2067,7 @@ LRESULT handle_nc_hit_test( HWND hwnd, POINT pt )
 
 static void track_min_max_box( HWND hwnd, WORD wparam )
 {
-    HDC hdc = NtUserGetDCEx( hwnd, 0, DCX_USESTYLE | DCX_WINDOW );
+    HDC hdc = NtUserGetWindowDC( hwnd );
     DWORD style = get_window_long( hwnd, GWL_STYLE );
     HMENU sys_menu = NtUserGetSystemMenu(hwnd, FALSE);
     void (*paint_button)( HWND, HDC, BOOL, BOOL );
@@ -2125,7 +2141,7 @@ static void track_close_button( HWND hwnd, WPARAM wparam, LPARAM lparam )
 
     /* If the close item of the sysmenu is disabled or not present do nothing */
     if((state & MF_DISABLED) || (state & MF_GRAYED) || state == 0xFFFFFFFF) return;
-    hdc = NtUserGetDCEx( hwnd, 0, DCX_USESTYLE | DCX_WINDOW );
+    hdc = NtUserGetWindowDC( hwnd );
     NtUserSetCapture( hwnd );
     draw_close_button( hwnd, hdc, TRUE, FALSE );
 
@@ -2175,7 +2191,7 @@ static LRESULT handle_nc_lbutton_down( HWND hwnd, WPARAM wparam, LPARAM lparam )
     case HTSYSMENU:
         if (style & WS_SYSMENU)
         {
-            HDC hdc = NtUserGetDCEx( hwnd, 0, DCX_USESTYLE | DCX_WINDOW );
+            HDC hdc = NtUserGetWindowDC( hwnd );
             draw_nc_sys_button( hwnd, hdc, TRUE );
             NtUserReleaseDC( hwnd, hdc );
             send_message( hwnd, WM_SYSCOMMAND, SC_MOUSEMENU + HTSYSMENU, lparam );
@@ -2327,7 +2343,7 @@ static LRESULT handle_nc_mouse_move( HWND hwnd, WPARAM wparam, LPARAM lparam )
     RECT rect;
     POINT pt;
 
-    TRACE( "hwnd=%p wparam=%#lx lparam=%#lx\n", hwnd, wparam, lparam );
+    TRACE( "hwnd=%p wparam=%#lx lparam=%#lx\n", hwnd, (long)wparam, lparam );
 
     if (wparam != HTHSCROLL && wparam != HTVSCROLL)
         return 0;
@@ -2953,7 +2969,8 @@ LRESULT desktop_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
     }
     case WM_NCCALCSIZE:
         return 0;
-
+    case WM_DISPLAYCHANGE:
+        return user_driver->pDesktopWindowProc( hwnd, msg, wparam, lparam );
     default:
         if (msg >= WM_USER && hwnd == get_desktop_window())
             return user_driver->pDesktopWindowProc( hwnd, msg, wparam, lparam );
@@ -2979,7 +2996,7 @@ BOOL WINAPI NtUserGetTitleBarInfo( HWND hwnd, TITLEBARINFO *info )
 
     if (info->cbSize != sizeof(TITLEBARINFO))
     {
-        TRACE( "Invalid TITLEBARINFO size: %d\n", info->cbSize );
+        TRACE( "Invalid TITLEBARINFO size: %d\n", (int)info->cbSize );
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }

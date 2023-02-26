@@ -74,14 +74,23 @@ static const CLSID CLSID_JScript =
 #define CLEAR_CALLED(func) \
     expect_ ## func = called_ ## func = FALSE
 
+DEFINE_EXPECT(sp_caller_QI_NULL);
 DEFINE_EXPECT(testArgConv);
+DEFINE_EXPECT(testGetCaller);
+DEFINE_EXPECT(testGetCallerJS);
+DEFINE_EXPECT(testGetCallerNested);
 DEFINE_EXPECT(OnEnterScript);
 DEFINE_EXPECT(OnLeaveScript);
 
+static IActiveScriptParse *active_script_parser;
 static IVariantChangeType *script_change_type;
 static IDispatch *stored_obj;
+static IServiceProvider *test_get_caller_sp;
 
 #define DISPID_TEST_TESTARGCONV      0x1000
+#define DISPID_TEST_TESTGETCALLER    0x1001
+#define DISPID_TEST_TESTGETCALLERJS  0x1002
+#define DISPID_TEST_TESTGETCALLERNESTED 0x1003
 
 typedef struct {
     int int_result;
@@ -97,14 +106,14 @@ static void _call_change_type(unsigned line, IVariantChangeType *change_type, VA
     HRESULT hres;
 
     VariantInit(dst);
-    if(V_VT(src) == VT_DISPATCH && vt != VT_BOOL) {
+    if(V_VT(src) != vt && vt != VT_BOOL && (V_VT(src) == VT_DISPATCH || V_VT(src) == VT_UNKNOWN)) {
         SET_EXPECT(OnEnterScript);
         SET_EXPECT(OnLeaveScript);
     }
     hres = IVariantChangeType_ChangeType(change_type, dst, src, 0, vt);
     ok_(__FILE__,line)(hres == S_OK, "ChangeType(%d) failed: %08lx\n", vt, hres);
     ok_(__FILE__,line)(V_VT(dst) == vt, "V_VT(dst) = %d\n", V_VT(dst));
-    if(V_VT(src) == VT_DISPATCH && vt != VT_BOOL) {
+    if(V_VT(src) != vt && vt != VT_BOOL && (V_VT(src) == VT_DISPATCH || V_VT(src) == VT_UNKNOWN)) {
         CHECK_CALLED(OnEnterScript);
         CHECK_CALLED(OnLeaveScript);
     }
@@ -118,7 +127,7 @@ static void _change_type_fail(unsigned line, IVariantChangeType *change_type, VA
 
     V_VT(&v) = VT_EMPTY;
     hres = IVariantChangeType_ChangeType(change_type, &v, src, 0, vt);
-    ok_(__FILE__,line)(hres == exhres, "ChangeType failed: %08lx, expected %08lx\n", hres, exhres);
+    ok_(__FILE__,line)(hres == exhres, "ChangeType failed: %08lx, expected %08lx [%d]\n", hres, exhres, V_VT(src));
 }
 
 static void test_change_type(IVariantChangeType *change_type, VARIANT *src, const conv_results_t *ex)
@@ -158,6 +167,20 @@ static void test_change_type(IVariantChangeType *change_type, VARIANT *src, cons
 
     call_change_type(change_type, &v, src, VT_I2);
     ok(V_I2(&v) == (INT16)ex->int_result, "V_I2(v) = %d, expected %d\n", V_I2(&v), ex->int_result);
+
+    if(V_VT(src) != VT_UNKNOWN)
+        change_type_fail(change_type, src, VT_UNKNOWN, E_NOTIMPL);
+    else {
+        call_change_type(change_type, &v, src, VT_UNKNOWN);
+        ok(V_UNKNOWN(&v) == V_UNKNOWN(src), "V_UNKNOWN(v) != V_UNKNOWN(src)\n");
+    }
+
+    if(V_VT(src) != VT_DISPATCH)
+        change_type_fail(change_type, src, VT_DISPATCH, E_NOTIMPL);
+    else {
+        call_change_type(change_type, &v, src, VT_DISPATCH);
+        ok(V_DISPATCH(&v) == V_DISPATCH(src), "V_DISPATCH(v) != V_DISPATCH(src)\n");
+    }
 }
 
 static void test_change_types(IVariantChangeType *change_type, IDispatch *obj_disp)
@@ -200,6 +223,10 @@ static void test_change_types(IVariantChangeType *change_type, IDispatch *obj_di
     V_VT(&v) = VT_NULL;
     test_change_type(change_type, &v, &null_results);
 
+    V_VT(&v) = VT_UNKNOWN;
+    V_UNKNOWN(&v) = (IUnknown*)obj_disp;
+    test_change_type(change_type, &v, &obj_results);
+
     V_VT(&v) = VT_DISPATCH;
     V_DISPATCH(&v) = obj_disp;
     test_change_type(change_type, &v, &obj_results);
@@ -235,6 +262,55 @@ static void test_caller(IServiceProvider *caller, IDispatch *arg_obj)
 
     IVariantChangeType_Release(change_type);
 }
+
+static IServiceProvider sp_caller_obj;
+
+static HRESULT WINAPI sp_caller_QueryInterface(IServiceProvider *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IServiceProvider, riid))
+        *ppv = &sp_caller_obj;
+    else {
+        ok(IsEqualGUID(&IID_NULL, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
+        CHECK_EXPECT(sp_caller_QI_NULL);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    return S_OK;
+}
+
+static ULONG WINAPI sp_caller_AddRef(IServiceProvider *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI sp_caller_Release(IServiceProvider *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI sp_caller_QueryService(IServiceProvider *iface, REFGUID guidService,
+        REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(guidService, &SID_GetCaller)) {
+        ok(IsEqualGUID(riid, &IID_IServiceProvider), "unexpected riid %s\n", wine_dbgstr_guid(riid));
+        *ppv = NULL;
+        return S_OK;
+    }
+
+    ok(0, "unexpected guidService %s with riid %s\n", wine_dbgstr_guid(guidService), wine_dbgstr_guid(riid));
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static const IServiceProviderVtbl sp_caller_vtbl = {
+    sp_caller_QueryInterface,
+    sp_caller_AddRef,
+    sp_caller_Release,
+    sp_caller_QueryService
+};
+
+static IServiceProvider sp_caller_obj = { &sp_caller_vtbl };
 
 static HRESULT WINAPI DispatchEx_QueryInterface(IDispatchEx *iface, REFIID riid, void **ppv)
 {
@@ -332,6 +408,21 @@ static HRESULT WINAPI Test_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD gr
         *pid = DISPID_TEST_TESTARGCONV;
         return S_OK;
     }
+    if(!lstrcmpW(bstrName, L"testGetCaller")) {
+        ok(grfdex == fdexNameCaseSensitive, "grfdex = %lx\n", grfdex);
+        *pid = DISPID_TEST_TESTGETCALLER;
+        return S_OK;
+    }
+    if(!lstrcmpW(bstrName, L"testGetCallerJS")) {
+        ok(grfdex == fdexNameCaseSensitive, "grfdex = %lx\n", grfdex);
+        *pid = DISPID_TEST_TESTGETCALLERJS;
+        return S_OK;
+    }
+    if(!lstrcmpW(bstrName, L"testGetCallerNested")) {
+        ok(grfdex == fdexNameCaseSensitive, "grfdex = %lx\n", grfdex);
+        *pid = DISPID_TEST_TESTGETCALLERNESTED;
+        return S_OK;
+    }
 
     return E_NOTIMPL;
 }
@@ -339,6 +430,9 @@ static HRESULT WINAPI Test_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD gr
 static HRESULT WINAPI Test_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
+    IServiceProvider *caller = (void*)0xdeadbeef;
+    HRESULT hres;
+
     ok(pspCaller != NULL, "pspCaller == NULL\n");
 
     switch(id) {
@@ -360,6 +454,80 @@ static HRESULT WINAPI Test_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WO
 
         stored_obj = V_DISPATCH(pdp->rgvarg);
         IDispatch_AddRef(stored_obj);
+        break;
+
+    case DISPID_TEST_TESTGETCALLER: {
+        void *iface = (void*)0xdeadbeef;
+
+        CHECK_EXPECT(testGetCaller);
+        CHECK_CALLED(OnEnterScript);
+
+        ok(wFlags == DISPATCH_METHOD, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pvarRes, "pvarRes != NULL\n");
+        ok(pei != NULL, "pei == NULL\n");
+
+        SET_EXPECT(OnEnterScript);
+        SET_EXPECT(OnLeaveScript);
+        SET_EXPECT(testGetCallerNested);
+        hres = IActiveScriptParse_ParseScriptText(active_script_parser, L"testGetCallerNested(1,2)",
+                                                  NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+        ok(hres == S_OK, "ParseScriptText failed: %08lx\n", hres);
+        CHECK_CALLED(testGetCallerNested);
+        CHECK_CALLED(OnLeaveScript);
+        CHECK_CALLED(OnEnterScript);
+        SET_EXPECT(OnLeaveScript);
+
+        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
+        ok(hres == S_OK, "Could not get SID_GetCaller service: %08lx\n", hres);
+        ok(caller == test_get_caller_sp, "caller != test_get_caller_sp\n");
+        if(caller) IServiceProvider_Release(caller);
+
+        if(test_get_caller_sp)
+            SET_EXPECT(sp_caller_QI_NULL);
+        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_NULL, &iface);
+        ok(hres == (test_get_caller_sp ? E_NOINTERFACE : S_OK), "Could not query SID_GetCaller with IID_NULL: %08lx\n", hres);
+        ok(iface == NULL, "iface != NULL\n");
+        if(test_get_caller_sp)
+            CHECK_CALLED(sp_caller_QI_NULL);
+        break;
+    }
+
+    case DISPID_TEST_TESTGETCALLERJS:
+        CHECK_EXPECT(testGetCallerJS);
+
+        ok(wFlags == DISPATCH_METHOD, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pvarRes, "pvarRes != NULL\n");
+        ok(pei != NULL, "pei == NULL\n");
+        ok(V_VT(pdp->rgvarg) == VT_I4, "V_VT(rgvarg) = %d\n", V_VT(pdp->rgvarg));
+        ok(V_I4(pdp->rgvarg) == 42, "V_I4(rgvarg) = %ld\n", V_I4(pdp->rgvarg));
+
+        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
+        ok(hres == E_NOINTERFACE, "QueryService(SID_GetCaller) returned: %08lx\n", hres);
+        ok(caller == NULL, "caller != NULL\n");
+        break;
+
+    case DISPID_TEST_TESTGETCALLERNESTED:
+        CHECK_EXPECT(testGetCallerNested);
+
+        ok(wFlags == DISPATCH_METHOD, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->cArgs == 2, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pvarRes, "pvarRes != NULL\n");
+        ok(pei != NULL, "pei == NULL\n");
+        ok(V_VT(&pdp->rgvarg[0]) == VT_I4, "V_VT(rgvarg[0]) = %d\n", V_VT(&pdp->rgvarg[0]));
+        ok(V_VT(&pdp->rgvarg[1]) == VT_I4, "V_VT(rgvarg[1]) = %d\n", V_VT(&pdp->rgvarg[1]));
+        ok(V_I4(&pdp->rgvarg[0]) == 2, "V_I4(rgvarg[0]) = %ld\n", V_I4(&pdp->rgvarg[0]));
+        ok(V_I4(&pdp->rgvarg[1]) == 1, "V_I4(rgvarg[1]) = %ld\n", V_I4(&pdp->rgvarg[1]));
+
+        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
+        ok(hres == E_NOINTERFACE, "QueryService(SID_GetCaller) returned: %08lx\n", hres);
+        ok(caller == NULL, "caller != NULL\n");
         break;
 
     default:
@@ -524,22 +692,32 @@ static IActiveScriptParse *create_script(void)
 
 static void run_scripts(void)
 {
-    IActiveScriptParse *parser;
+    IActiveScript *active_script;
+    DISPPARAMS dp = { 0 };
+    IDispatchEx *dispex;
+    IDispatch *disp;
+    DISPID dispid;
     HRESULT hres;
+    VARIANT var;
+    BSTR bstr;
 
-    parser = create_script();
+    active_script_parser = create_script();
 
-    hres = IActiveScriptParse_QueryInterface(parser, &IID_IVariantChangeType, (void**)&script_change_type);
+    hres = IActiveScriptParse_QueryInterface(active_script_parser, &IID_IVariantChangeType, (void**)&script_change_type);
     ok(hres == S_OK, "Could not get IVariantChangeType iface: %08lx\n", hres);
 
     SET_EXPECT(OnEnterScript); /* checked in callback */
     SET_EXPECT(testArgConv);
-    parse_script(parser,
+    SET_EXPECT(testGetCallerJS);
+    parse_script(active_script_parser,
                  L"var obj = {"
                  L"    toString: function() { return 'strval'; },"
                  L"    valueOf: function()  { return 10; }"
                  L"};"
-                 L"testArgConv(obj);");
+                 L"testArgConv(obj);"
+                 L"function testGetCallerFunc() { testGetCaller(); };"
+                 L"testGetCallerJS(42);");
+    CHECK_CALLED(testGetCallerJS);
     CHECK_CALLED(testArgConv);
     CHECK_CALLED(OnLeaveScript); /* set in callback */
 
@@ -547,7 +725,47 @@ static void run_scripts(void)
     IDispatch_Release(stored_obj);
     IVariantChangeType_Release(script_change_type);
 
-    IActiveScriptParse_Release(parser);
+    hres = IActiveScriptParse_QueryInterface(active_script_parser, &IID_IActiveScript, (void**)&active_script);
+    ok(hres == S_OK, "Could not get IActiveScript: %08lx\n", hres);
+    hres = IActiveScript_GetScriptDispatch(active_script, NULL, &disp);
+    ok(hres == S_OK, "GetScriptDispatch failed: %08lx\n", hres);
+    IActiveScript_Release(active_script);
+    hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx: %08lx\n", hres);
+    IDispatch_Release(disp);
+    bstr = SysAllocString(L"testGetCallerFunc");
+    hres = IDispatchEx_GetDispID(dispex, bstr, 0, &dispid);
+    ok(hres == S_OK, "GetDispID failed: %08lx\n", hres);
+    SysFreeString(bstr);
+
+    hres = IDispatchEx_InvokeEx(dispex, dispid, 0, DISPATCH_PROPERTYGET, &dp, &var, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    ok(V_VT(&var) == VT_DISPATCH, "V_VT(testGetCallerFunc) = %d\n", V_VT(&var));
+    ok(V_DISPATCH(&var) != NULL, "V_DISPATCH(testGetCallerFunc) = NULL\n");
+    IDispatchEx_Release(dispex);
+    hres = IDispatch_QueryInterface(V_DISPATCH(&var), &IID_IDispatchEx, (void**)&dispex);
+    ok(hres == S_OK, "Could not get IDispatchEx: %08lx\n", hres);
+    IDispatch_Release(V_DISPATCH(&var));
+
+    SET_EXPECT(OnEnterScript);
+    SET_EXPECT(OnLeaveScript);
+    SET_EXPECT(testGetCaller);
+    hres = IDispatchEx_InvokeEx(dispex, DISPID_VALUE, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    CHECK_CALLED(testGetCaller);
+    CHECK_CALLED(OnLeaveScript);
+    test_get_caller_sp = &sp_caller_obj;
+    SET_EXPECT(OnEnterScript);
+    SET_EXPECT(OnLeaveScript);
+    SET_EXPECT(testGetCaller);
+    hres = IDispatchEx_InvokeEx(dispex, DISPID_VALUE, 0, DISPATCH_METHOD, &dp, NULL, NULL, test_get_caller_sp);
+    ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
+    CHECK_CALLED(testGetCaller);
+    CHECK_CALLED(OnLeaveScript);
+    IDispatchEx_Release(dispex);
+
+    IActiveScriptParse_Release(active_script_parser);
+    active_script_parser = NULL;
 }
 
 static BOOL check_jscript(void)

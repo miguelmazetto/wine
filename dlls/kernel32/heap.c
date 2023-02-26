@@ -41,56 +41,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(globalmem);
 
-/* address where we try to map the system heap */
-#define SYSTEM_HEAP_BASE  ((void*)0x80000000)
-#define SYSTEM_HEAP_SIZE  0x1000000   /* Default heap size = 16Mb */
-
-static HANDLE systemHeap;   /* globally shared heap */
-
 BOOLEAN WINAPI RtlGetUserInfoHeap( HANDLE handle, ULONG flags, void *ptr, void **user_value, ULONG *user_flags );
 BOOLEAN WINAPI RtlSetUserValueHeap( HANDLE handle, ULONG flags, void *ptr, void *user_value );
-
-/***********************************************************************
- *           HEAP_CreateSystemHeap
- *
- * Create the system heap.
- */
-static inline HANDLE HEAP_CreateSystemHeap(void)
-{
-    int created;
-    void *base;
-    HANDLE map, event;
-
-    /* create the system heap event first */
-    event = CreateEventA( NULL, TRUE, FALSE, "__wine_system_heap_event" );
-
-    if (!(map = CreateFileMappingA( INVALID_HANDLE_VALUE, NULL, SEC_COMMIT | PAGE_READWRITE,
-                                    0, SYSTEM_HEAP_SIZE, "__wine_system_heap" ))) return 0;
-    created = (GetLastError() != ERROR_ALREADY_EXISTS);
-
-    if (!(base = MapViewOfFileEx( map, FILE_MAP_ALL_ACCESS, 0, 0, 0, SYSTEM_HEAP_BASE )))
-    {
-        /* pre-defined address not available */
-        ERR( "system heap base address %p not available\n", SYSTEM_HEAP_BASE );
-        return 0;
-    }
-
-    if (created)  /* newly created heap */
-    {
-        systemHeap = RtlCreateHeap( HEAP_SHARED, base, SYSTEM_HEAP_SIZE,
-                                    SYSTEM_HEAP_SIZE, NULL, NULL );
-        SetEvent( event );
-    }
-    else
-    {
-        /* wait for the heap to be initialized */
-        WaitForSingleObject( event, INFINITE );
-        systemHeap = base;
-    }
-    CloseHandle( map );
-    return systemHeap;
-}
-
 
 /***********************************************************************
  *           HeapCreate   (KERNEL32.@)
@@ -108,17 +60,8 @@ HANDLE WINAPI HeapCreate(
 ) {
     HANDLE ret;
 
-    if ( flags & HEAP_SHARED )
-    {
-        if (!systemHeap) HEAP_CreateSystemHeap();
-        else WARN( "Shared Heap requested, returning system heap.\n" );
-        ret = systemHeap;
-    }
-    else
-    {
-        ret = RtlCreateHeap( flags, NULL, maxSize, initialSize, NULL, NULL );
-        if (!ret) SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-    }
+    ret = RtlCreateHeap( flags, NULL, maxSize, initialSize, NULL, NULL );
+    if (!ret) SetLastError( ERROR_NOT_ENOUGH_MEMORY );
     return ret;
 }
 
@@ -134,11 +77,6 @@ HANDLE WINAPI HeapCreate(
  */
 BOOL WINAPI HeapDestroy( HANDLE heap /* [in] Handle of heap */ )
 {
-    if (heap == systemHeap)
-    {
-        WARN( "attempt to destroy system heap, returning TRUE!\n" );
-        return TRUE;
-    }
     if (!RtlDestroyHeap( heap )) return TRUE;
     SetLastError( ERROR_INVALID_HANDLE );
     return FALSE;
@@ -257,7 +195,10 @@ HGLOBAL WINAPI GlobalReAlloc( HGLOBAL handle, SIZE_T size, UINT flags )
     struct mem_entry *mem;
     void *ptr;
 
-    if ((mem = unsafe_mem_from_HLOCAL( handle )) && mem->lock) return 0;
+    if (!(flags & GMEM_MODIFY) && (mem = unsafe_mem_from_HLOCAL( handle )) &&
+        mem->lock && (!size || (flags & GMEM_DISCARDABLE)))
+        return 0;
+
     if (!(handle = LocalReAlloc( handle, size, flags ))) return 0;
 
     /* GlobalReAlloc allows changing GMEM_FIXED to GMEM_MOVEABLE with GMEM_MODIFY */
@@ -405,7 +346,8 @@ UINT WINAPI LocalFlags( HLOCAL handle )
  */
 HLOCAL WINAPI LocalHandle( const void *ptr )
 {
-    HLOCAL handle;
+    HANDLE heap = GetProcessHeap();
+    HLOCAL handle = (HANDLE)ptr;
     ULONG flags;
 
     TRACE_(globalmem)( "ptr %p\n", ptr );
@@ -416,11 +358,14 @@ HLOCAL WINAPI LocalHandle( const void *ptr )
         return 0;
     }
 
-    if (!RtlGetUserInfoHeap( GetProcessHeap(), 0, (void *)ptr, &handle, &flags ))
+    RtlLockHeap( heap );
+    if (!HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ) ||
+        !RtlGetUserInfoHeap( heap, HEAP_NO_SERIALIZE, (void *)ptr, &handle, &flags ))
     {
         SetLastError( ERROR_INVALID_HANDLE );
-        return 0;
+        handle = 0;
     }
+    RtlUnlockHeap( heap );
 
     return handle;
 }
@@ -447,7 +392,8 @@ SIZE_T WINAPI LocalSize( HLOCAL handle )
     TRACE_(globalmem)( "handle %p\n", handle );
 
     RtlLockHeap( heap );
-    if ((ptr = unsafe_ptr_from_HLOCAL( handle )))
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )) &&
+        HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ))
         ret = HeapSize( heap, HEAP_NO_SERIALIZE, ptr );
     else if ((mem = unsafe_mem_from_HLOCAL( handle )))
     {

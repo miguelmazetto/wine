@@ -2185,6 +2185,35 @@ LONG FASTCALL NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
     return InterlockedIncrement( dest );
 }
 
+#ifdef __i386__
+
+/*************************************************************************
+ *           RtlUshortByteSwap   (NTOSKRNL.EXE.@)
+ */
+__ASM_FASTCALL_FUNC(RtlUshortByteSwap, 4,
+                    "movb %ch,%al\n\t"
+                    "movb %cl,%ah\n\t"
+                    "ret")
+
+/*************************************************************************
+ *           RtlUlongByteSwap   (NTOSKRNL.EXE.@)
+ */
+__ASM_FASTCALL_FUNC(RtlUlongByteSwap, 4,
+                    "movl %ecx,%eax\n\t"
+                    "bswap %eax\n\t"
+                    "ret")
+
+/*************************************************************************
+ *           RtlUlonglongByteSwap   (NTOSKRNL.EXE.@)
+ */
+__ASM_FASTCALL_FUNC(RtlUlonglongByteSwap, 8,
+                    "movl 4(%esp),%edx\n\t"
+                    "bswap %edx\n\t"
+                    "movl 8(%esp),%eax\n\t"
+                    "bswap %eax\n\t"
+                    "ret $8")
+
+#endif  /* __i386__ */
 
 /***********************************************************************
  *           ExAllocatePool   (NTOSKRNL.EXE.@)
@@ -2569,6 +2598,15 @@ LONG WINAPI KeInsertQueue(PRKQUEUE Queue, PLIST_ENTRY Entry)
     return 0;
 }
 
+/***********************************************************************
+ *           KeInsertQueueDpc   (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeInsertQueueDpc(PRKDPC Dpc, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    FIXME( "stub: (%p %p %p)\n", Dpc, SystemArgument1, SystemArgument2 );
+    return TRUE;
+}
+
 /**********************************************************************
  *           KeQueryActiveProcessors   (NTOSKRNL.EXE.@)
  *
@@ -2591,6 +2629,16 @@ ULONG WINAPI KeQueryActiveProcessorCountEx(USHORT group_number)
     TRACE("group_number %u.\n", group_number);
 
     return GetActiveProcessorCount(group_number);
+}
+
+ULONG WINAPI KeQueryActiveProcessorCount(PKAFFINITY active_processors)
+{
+    TRACE("active_processors %p.\n", active_processors);
+
+    if(active_processors)
+        *active_processors = KeQueryActiveProcessors();
+
+    return KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
 }
 
 /**********************************************************************
@@ -3310,8 +3358,7 @@ PVOID WINAPI MmGetSystemRoutineAddress(PUNICODE_STRING SystemRoutineName)
         pFunc = GetProcAddress( hMod, routineNameA.Buffer );
         if (!pFunc)
         {
-           hMod = GetModuleHandleW( halW );
-
+           hMod = LoadLibraryW( halW );
            if (hMod) pFunc = GetProcAddress( hMod, routineNameA.Buffer );
         }
         RtlFreeAnsiString( &routineNameA );
@@ -3404,6 +3451,22 @@ ULONG WINAPI KeGetCurrentProcessorNumberEx(PPROCESSOR_NUMBER process_number)
     }
 
     return cur_number;
+}
+
+/***********************************************************************
+ *          KeQueryMaximumProcessorCountEx   (NTOSKRNL.EXE.@)
+ */
+ULONG WINAPI KeQueryMaximumProcessorCountEx(USHORT group_number)
+{
+    return GetMaximumProcessorCount(group_number);
+}
+
+/***********************************************************************
+ *          KeQueryMaximumProcessorCount   (NTOSKRNL.EXE.@)
+ */
+ULONG WINAPI KeQueryMaximumProcessorCount(void)
+{
+    return KeQueryMaximumProcessorCountEx(0);
 }
 
 /***********************************************************************
@@ -4065,16 +4128,6 @@ NTSTATUS WINAPI IoCreateFile(HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRIBUT
     return IoCreateFileEx(handle, access, attr, io, alloc_size, attributes, sharing, disposition,
                           create_options, ea_buffer, ea_length, file_type, parameters, options, NULL);
 }
-
-/***********************************************************************
- *           IoCreateNotificationEvent (NTOSKRNL.EXE.@)
- */
-PKEVENT WINAPI IoCreateNotificationEvent(UNICODE_STRING *name, HANDLE *handle)
-{
-    FIXME( "stub: %s %p\n", debugstr_us(name), handle );
-    return NULL;
-}
-
 
 /**************************************************************************
  *		__chkstk (NTOSKRNL.@)

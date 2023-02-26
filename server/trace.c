@@ -189,6 +189,13 @@ static void dump_apc_call( const char *prefix, const apc_call_t *call )
         dump_uint64( ",zero_bits=", &call->virtual_alloc.zero_bits );
         fprintf( stderr, ",op_type=%x,prot=%x", call->virtual_alloc.op_type, call->virtual_alloc.prot );
         break;
+    case APC_VIRTUAL_ALLOC_EX:
+        dump_uint64( "APC_VIRTUAL_ALLOC,addr==", &call->virtual_alloc_ex.addr );
+        dump_uint64( ",size=", &call->virtual_alloc_ex.size );
+        dump_uint64( ",limit=", &call->virtual_alloc_ex.limit );
+        dump_uint64( ",align=", &call->virtual_alloc_ex.align );
+        fprintf( stderr, ",op_type=%x,prot=%x", call->virtual_alloc_ex.op_type, call->virtual_alloc_ex.prot );
+        break;
     case APC_VIRTUAL_FREE:
         dump_uint64( "APC_VIRTUAL_FREE,addr=", &call->virtual_free.addr );
         dump_uint64( ",size=", &call->virtual_free.size );
@@ -2757,6 +2764,12 @@ static void dump_set_serial_info_request( const struct set_serial_info_request *
     fprintf( stderr, ", flags=%d", req->flags );
 }
 
+static void dump_cancel_sync_request( const struct cancel_sync_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    dump_uint64( ", iosb=", &req->iosb );
+}
+
 static void dump_register_async_request( const struct register_async_request *req )
 {
     fprintf( stderr, " type=%d", req->type );
@@ -2848,6 +2861,7 @@ static void dump_create_named_pipe_request( const struct create_named_pipe_reque
     fprintf( stderr, " access=%08x", req->access );
     fprintf( stderr, ", options=%08x", req->options );
     fprintf( stderr, ", sharing=%08x", req->sharing );
+    fprintf( stderr, ", disposition=%08x", req->disposition );
     fprintf( stderr, ", maxinstances=%08x", req->maxinstances );
     fprintf( stderr, ", outsize=%08x", req->outsize );
     fprintf( stderr, ", insize=%08x", req->insize );
@@ -2859,6 +2873,7 @@ static void dump_create_named_pipe_request( const struct create_named_pipe_reque
 static void dump_create_named_pipe_reply( const struct create_named_pipe_reply *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", created=%d", req->created );
 }
 
 static void dump_set_named_pipe_info_request( const struct set_named_pipe_info_request *req )
@@ -4623,6 +4638,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_is_window_hung_request,
     (dump_func)dump_get_serial_info_request,
     (dump_func)dump_set_serial_info_request,
+    (dump_func)dump_cancel_sync_request,
     (dump_func)dump_register_async_request,
     (dump_func)dump_cancel_async_request,
     (dump_func)dump_get_async_result_request,
@@ -4905,6 +4921,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     NULL,
+    NULL,
     (dump_func)dump_get_async_result_reply,
     (dump_func)dump_set_async_direct_result_reply,
     (dump_func)dump_read_reply,
@@ -5183,6 +5200,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "is_window_hung",
     "get_serial_info",
     "set_serial_info",
+    "cancel_sync",
     "register_async",
     "cancel_async",
     "get_async_result",

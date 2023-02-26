@@ -36,6 +36,7 @@
 #include "setupapi.h"
 #include "cfgmgr32.h"
 #include "newdev.h"
+#include "regstr.h"
 #include "dbt.h"
 #include "initguid.h"
 #include "devguid.h"
@@ -1399,13 +1400,13 @@ static LRESULT WINAPI device_notify_proc(HWND window, UINT message, WPARAM wpara
             if (IsEqualGUID(&iface->dbcc_classguid, &bus_class))
             {
                 ++got_bus_arrival;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             else if (IsEqualGUID(&iface->dbcc_classguid, &child_class))
             {
                 ++got_child_arrival;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\wine#test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\Wine#Test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             break;
@@ -1427,13 +1428,13 @@ static LRESULT WINAPI device_notify_proc(HWND window, UINT message, WPARAM wpara
             if (IsEqualGUID(&iface->dbcc_classguid, &bus_class))
             {
                 ++got_bus_removal;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\ROOT#WINETEST#0#{deadbeef-29ef-4538-a5fd-b69573a362c1}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             else if (IsEqualGUID(&iface->dbcc_classguid, &child_class))
             {
                 ++got_child_removal;
-                todo_wine ok(!strcmp(iface->dbcc_name, "\\\\?\\wine#test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
+                ok(!strcmp(iface->dbcc_name, "\\\\?\\Wine#Test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
                         "got name %s\n", debugstr_a(iface->dbcc_name));
             }
             break;
@@ -1505,7 +1506,7 @@ static void test_pnp_devices(void)
 
     ret = SetupDiGetDeviceInstanceIdA(set, &device, buffer, sizeof(buffer), NULL);
     ok(ret, "failed to get device ID, error %#lx\n", GetLastError());
-    ok(!strcasecmp(buffer, "root\\winetest\\0"), "got ID %s\n", debugstr_a(buffer));
+    ok(!strcmp(buffer, "ROOT\\WINETEST\\0"), "got ID %s\n", debugstr_a(buffer));
 
     ret = SetupDiEnumDeviceInterfaces(set, NULL, &control_class, 0, &iface);
     ok(ret, "failed to get interface, error %#lx\n", GetLastError());
@@ -1516,7 +1517,7 @@ static void test_pnp_devices(void)
     iface_detail->cbSize = sizeof(*iface_detail);
     ret = SetupDiGetDeviceInterfaceDetailA(set, &iface, iface_detail, sizeof(buffer), NULL, NULL);
     ok(ret, "failed to get interface path, error %#lx\n", GetLastError());
-    ok(!strcasecmp(iface_detail->DevicePath, "\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}"),
+    ok(!strcmp(iface_detail->DevicePath, "\\\\?\\root#winetest#0#{deadbeef-29ef-4538-a5fd-b69573a362c0}"),
             "wrong path %s\n", debugstr_a(iface_detail->DevicePath));
 
     SetupDiDestroyDeviceInfoList(set);
@@ -1613,7 +1614,7 @@ static void test_pnp_devices(void)
 
     ret = SetupDiGetDeviceInstanceIdA(set, &device, buffer, sizeof(buffer), NULL);
     ok(ret, "failed to get device ID, error %#lx\n", GetLastError());
-    ok(!strcasecmp(buffer, "wine\\test\\1"), "got ID %s\n", debugstr_a(buffer));
+    ok(!strcmp(buffer, "WINE\\TEST\\1"), "got ID %s\n", debugstr_a(buffer));
 
     ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CAPABILITIES,
             &type, (BYTE *)&dword, sizeof(dword), NULL);
@@ -1630,6 +1631,13 @@ static void test_pnp_devices(void)
     todo_wine ok(!ret, "expected failure\n");
     if (ret)
         ok(GetLastError() == ERROR_INVALID_DATA, "got error %#lx\n", GetLastError());
+
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CONFIGFLAGS,
+            &type, (BYTE *)&dword, sizeof(dword), NULL);
+    ok(ret, "got error %#lx\n", GetLastError());
+    /* windows 7 sets CONFIGFLAG_FINISH_INSTALL; it's not clear what this means */
+    ok(!(dword & ~CONFIGFLAG_FINISH_INSTALL), "got flags %#lx\n", dword);
+    ok(type == REG_DWORD, "got type %lu\n", type);
 
     ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_DEVTYPE,
             &type, (BYTE *)&dword, sizeof(dword), NULL);
@@ -1671,6 +1679,18 @@ static void test_pnp_devices(void)
         ok(type == REG_SZ, "got type %lu\n", type);
         ok(!strcmp(buffer, "\\Device\\winetest_pnp_1"), "got PDO name %s\n", debugstr_a(buffer));
     }
+
+    ret = SetupDiEnumDeviceInterfaces(set, NULL, &child_class, 0, &iface);
+    ok(ret, "failed to get interface, error %#lx\n", GetLastError());
+    ok(IsEqualGUID(&iface.InterfaceClassGuid, &child_class),
+            "wrong class %s\n", debugstr_guid(&iface.InterfaceClassGuid));
+    ok(iface.Flags == SPINT_ACTIVE, "got flags %#lx\n", iface.Flags);
+
+    iface_detail->cbSize = sizeof(*iface_detail);
+    ret = SetupDiGetDeviceInterfaceDetailA(set, &iface, iface_detail, sizeof(buffer), NULL, NULL);
+    ok(ret, "failed to get interface path, error %#lx\n", GetLastError());
+    ok(!strcmp(iface_detail->DevicePath, "\\\\?\\wine#test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}"),
+            "wrong path %s\n", debugstr_a(iface_detail->DevicePath));
 
     SetupDiDestroyDeviceInfoList(set);
 
@@ -1740,6 +1760,7 @@ static void test_pnp_driver(struct testsign_context *ctx)
     SC_HANDLE manager, service;
     BOOL ret, need_reboot;
     HANDLE catalog, file;
+    DWORD dword, type;
     unsigned int i;
     HDEVINFO set;
     FILE *f;
@@ -1798,10 +1819,21 @@ static void test_pnp_driver(struct testsign_context *ctx)
     ret = SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device);
     ok(ret, "failed to register device, error %#lx\n", GetLastError());
 
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CONFIGFLAGS,
+            &type, (BYTE *)&dword, sizeof(dword), NULL);
+    ok(!ret, "expected failure\n");
+    ok(GetLastError() == ERROR_INVALID_DATA, "got error %#lx\n", GetLastError());
+
     GetFullPathNameA("winetest.inf", sizeof(path), path, NULL);
     ret = UpdateDriverForPlugAndPlayDevicesA(NULL, hardware_id, path, INSTALLFLAG_FORCE, &need_reboot);
     ok(ret, "failed to install device, error %#lx\n", GetLastError());
     ok(!need_reboot, "expected no reboot necessary\n");
+
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_CONFIGFLAGS,
+            &type, (BYTE *)&dword, sizeof(dword), NULL);
+    ok(ret, "got error %#lx\n", GetLastError());
+    ok(!dword, "got flags %#lx\n", dword);
+    ok(type == REG_DWORD, "got type %lu\n", type);
 
     /* Tests. */
 

@@ -92,7 +92,6 @@ extern BOOL CDECL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp) DECLSPEC_H
 enum macdrv_window_messages
 {
     WM_MACDRV_SET_WIN_REGION = 0x80001000,
-    WM_MACDRV_UPDATE_DESKTOP_RECT,
     WM_MACDRV_RESET_DEVICE_METRICS,
     WM_MACDRV_DISPLAYCHANGE,
     WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS,
@@ -123,8 +122,9 @@ static inline struct macdrv_thread_data *macdrv_thread_data(void)
 
 extern BOOL macdrv_ActivateKeyboardLayout(HKL hkl, UINT flags) DECLSPEC_HIDDEN;
 extern void macdrv_Beep(void) DECLSPEC_HIDDEN;
-extern LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, HWND hwnd, DWORD flags, LPVOID lpvoid) DECLSPEC_HIDDEN;
-extern BOOL macdrv_GetCurrentDisplaySettings(LPCWSTR name, LPDEVMODEW devmode) DECLSPEC_HIDDEN;
+extern LONG macdrv_ChangeDisplaySettings(LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd, DWORD flags, LPVOID lpvoid) DECLSPEC_HIDDEN;
+extern BOOL macdrv_GetCurrentDisplaySettings(LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode) DECLSPEC_HIDDEN;
+extern INT macdrv_GetDisplayDepth(LPCWSTR name, BOOL is_primary) DECLSPEC_HIDDEN;
 extern LRESULT macdrv_ClipboardWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) DECLSPEC_HIDDEN;
 extern BOOL macdrv_UpdateDisplayDevices( const struct gdi_device_manager *device_manager,
                                          BOOL force, void *param ) DECLSPEC_HIDDEN;
@@ -169,9 +169,7 @@ extern UINT macdrv_GetKeyboardLayoutList(INT size, HKL *list) DECLSPEC_HIDDEN;
 extern INT macdrv_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size) DECLSPEC_HIDDEN;
 extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_param,
                                         UINT flags) DECLSPEC_HIDDEN;
-extern NTSTATUS macdrv_MsgWaitForMultipleObjectsEx(DWORD count, const HANDLE *handles,
-                                                   const LARGE_INTEGER *timeout, DWORD mask,
-                                                   DWORD flags) DECLSPEC_HIDDEN;
+extern BOOL macdrv_ProcessEvents(DWORD mask) DECLSPEC_HIDDEN;
 extern void macdrv_ThreadDetach(void) DECLSPEC_HIDDEN;
 
 
@@ -268,6 +266,7 @@ extern void macdrv_status_item_mouse_move(const macdrv_event *event) DECLSPEC_HI
 
 extern void check_retina_status(void) DECLSPEC_HIDDEN;
 extern void macdrv_init_display_devices(BOOL force) DECLSPEC_HIDDEN;
+extern void macdrv_resize_desktop(void) DECLSPEC_HIDDEN;
 extern void init_user_driver(void) DECLSPEC_HIDDEN;
 
 /* unixlib interface */

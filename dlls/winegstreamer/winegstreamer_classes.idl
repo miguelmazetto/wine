@@ -36,6 +36,13 @@ coclass AviSplitter {}
 coclass CMpegAudioCodec {}
 
 [
+    helpstring("MPEG Layer-3 Decoder"),
+    threading(both),
+    uuid(38be3000-dbf4-11d0-860e-00a024cfef6d)
+]
+coclass mpeg_layer3_decoder {}
+
+[
     helpstring("MPEG-I Stream Splitter"),
     threading(both),
     uuid(336475d0-942a-11ce-a870-00aa002feab5)
@@ -74,6 +81,18 @@ coclass GStreamerByteStreamHandler {}
     uuid(2eeb4adf-4578-4d10-bca7-bb955f56320a)
 ]
 coclass CWMADecMediaObject {};
+
+[
+    threading(both),
+    uuid(32d186a7-218f-4c75-8876-dd77273a8999)
+]
+coclass CMSAACDecMFT {}
+
+[
+    threading(both),
+    uuid(82d353df-90bd-4382-8bc2-3f6192b76e34)
+]
+coclass CWMVDecMediaObject {}
 
 [
     threading(both),

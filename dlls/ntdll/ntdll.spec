@@ -153,10 +153,12 @@
 # @ stub NtCancelDeviceWakeupRequest
 @ stdcall -syscall NtCancelIoFile(long ptr)
 @ stdcall -syscall NtCancelIoFileEx(long ptr ptr)
+@ stdcall -syscall NtCancelSynchronousIoFile(long ptr ptr)
 @ stdcall -syscall NtCancelTimer(long ptr)
 @ stdcall -syscall NtClearEvent(long)
 @ stdcall -syscall NtClose(long)
 # @ stub NtCloseObjectAuditAlarm
+@ stdcall -syscall NtCommitTransaction(long long)
 # @ stub NtCompactKeys
 @ stdcall -syscall NtCompareObjects(ptr ptr)
 # @ stub NtCompareTokens
@@ -191,6 +193,7 @@
 @ stdcall -syscall NtCreateThreadEx(ptr long ptr long ptr ptr long long long long ptr)
 @ stdcall -syscall NtCreateTimer(ptr long ptr long)
 # @ stub NtCreateToken
+@ stdcall -syscall NtCreateTransaction(ptr long ptr ptr long long long long ptr ptr)
 @ stdcall -syscall NtCreateUserProcess(ptr ptr long long ptr ptr long long ptr ptr ptr)
 # @ stub NtCreateWaitablePort
 @ stdcall -arch=i386,arm64 NtCurrentTeb()
@@ -364,6 +367,7 @@
 @ stdcall -syscall NtRestoreKey(long long long)
 @ stdcall -syscall NtResumeProcess(long)
 @ stdcall -syscall NtResumeThread(long ptr)
+@ stdcall -syscall NtRollbackTransaction(long long)
 @ stdcall -syscall NtSaveKey(long long)
 # @ stub NtSaveKeyEx
 # @ stub NtSaveMergedKeys
@@ -486,7 +490,7 @@
 # @ stub RtlAddRefMemoryStream
 @ stdcall RtlAddVectoredContinueHandler(long ptr)
 @ stdcall RtlAddVectoredExceptionHandler(long ptr)
-# @ stub RtlAddressInSectionTable
+@ stdcall RtlAddressInSectionTable(ptr long long)
 @ stdcall RtlAdjustPrivilege(long long long ptr)
 @ stdcall RtlAllocateAndInitializeSid (ptr long long long long long long long long long ptr)
 @ stdcall RtlAllocateHandle(ptr ptr)
@@ -877,8 +881,8 @@
 @ stub RtlNewInstanceSecurityObject
 @ stub RtlNewSecurityGrantedAccess
 @ stdcall RtlNewSecurityObject(ptr ptr ptr long ptr ptr)
-# @ stub RtlNewSecurityObjectEx
-# @ stub RtlNewSecurityObjectWithMultipleInheritance
+@ stdcall RtlNewSecurityObjectEx(ptr ptr ptr ptr long long long ptr)
+@ stdcall RtlNewSecurityObjectWithMultipleInheritance(ptr ptr ptr ptr long long long long ptr)
 @ stdcall RtlNormalizeProcessParams(ptr)
 @ stdcall RtlNormalizeString(long wstr long ptr ptr)
 # @ stub RtlNtPathNameToDosPathName
@@ -1037,8 +1041,8 @@
 @ stdcall RtlTryAcquireSRWLockShared(ptr)
 @ stdcall RtlTryEnterCriticalSection(ptr)
 @ stdcall RtlUTF8ToUnicodeN(ptr long ptr ptr long)
-@ cdecl -i386 -norelay RtlUlongByteSwap() NTDLL_RtlUlongByteSwap
-@ cdecl -ret64 RtlUlonglongByteSwap(int64)
+@ stdcall -fastcall -arch=i386 -norelay RtlUlongByteSwap(long)
+@ stdcall -fastcall -arch=i386 -norelay RtlUlonglongByteSwap(int64)
 # @ stub RtlUnhandledExceptionFilter2
 # @ stub RtlUnhandledExceptionFilter
 @ stdcall RtlUnicodeStringToAnsiSize(ptr)
@@ -1071,7 +1075,7 @@
 @ stdcall RtlUpperString(ptr ptr)
 @ stub RtlUsageHeap
 @ stdcall -norelay RtlUserThreadStart(ptr ptr)
-@ cdecl -i386 -norelay RtlUshortByteSwap() NTDLL_RtlUshortByteSwap
+@ stdcall -fastcall -arch=i386 -norelay RtlUshortByteSwap(long)
 @ stdcall RtlValidAcl(ptr)
 @ stdcall RtlValidRelativeSecurityDescriptor(ptr long long)
 @ stdcall RtlValidSecurityDescriptor(ptr)
@@ -1186,6 +1190,7 @@
 # @ stub ZwCancelDeviceWakeupRequest
 @ stdcall -private -syscall ZwCancelIoFile(long ptr) NtCancelIoFile
 @ stdcall -private -syscall ZwCancelIoFileEx(long ptr ptr) NtCancelIoFileEx
+@ stdcall -private -syscall ZwCancelSynchronousIoFile(long ptr ptr) NtCancelSynchronousIoFile
 @ stdcall -private -syscall ZwCancelTimer(long ptr) NtCancelTimer
 @ stdcall -private -syscall ZwClearEvent(long) NtClearEvent
 @ stdcall -private -syscall ZwClose(long) NtClose
@@ -1683,20 +1688,21 @@
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
 # Server interface
-@ cdecl -syscall -norelay wine_server_call(ptr)
-@ cdecl -syscall wine_server_fd_to_handle(long long long ptr)
-@ cdecl -syscall wine_server_handle_to_fd(long long ptr ptr)
+@ cdecl -norelay wine_server_call(ptr)
+@ cdecl wine_server_fd_to_handle(long long long ptr)
+@ cdecl wine_server_handle_to_fd(long long ptr ptr)
 
 # Unix interface
-@ stdcall -syscall __wine_unix_call(int64 long ptr)
-@ stdcall -syscall __wine_unix_spawnvp(long ptr)
-@ cdecl __wine_set_unix_funcs(long ptr)
+@ stdcall __wine_unix_call(int64 long ptr)
+@ stdcall __wine_unix_spawnvp(long ptr)
 @ stdcall __wine_ctrl_routine(ptr)
-@ extern __wine_syscall_dispatcher
-@ extern -arch=i386 __wine_ldt_copy
+@ extern -private __wine_syscall_dispatcher
+@ extern -private __wine_unix_call_dispatcher
+@ extern -private __wine_unixlib_handle
+@ extern -arch=arm64 __wine_current_teb
 
 # Debugging
-@ stdcall -syscall -norelay __wine_dbg_write(ptr long)
+@ stdcall -norelay __wine_dbg_write(ptr long)
 @ cdecl -norelay __wine_dbg_get_channel_flags(ptr)
 @ cdecl -norelay __wine_dbg_header(long long str)
 @ cdecl -norelay __wine_dbg_output(str)

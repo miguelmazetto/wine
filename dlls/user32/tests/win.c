@@ -160,6 +160,7 @@ static BOOL ignore_message( UINT message, HWND hwnd )
 
     /* these are always ignored */
     return (message >= 0xc000 ||
+            message == 0x0060 || /* Internal undocumented message introduced by Win11 */
             message == WM_GETICON ||
             message == WM_GETOBJECT ||
             message == WM_TIMER ||
@@ -8143,9 +8144,11 @@ static void test_EnableWindow(void)
     DWORD tid;
     MSG msg;
 
-    hwnd = CreateWindowExA(0, "MainWindowClass", NULL, WS_OVERLAPPEDWINDOW,
-                           0, 0, 100, 100, 0, 0, 0, NULL);
+    hwnd = CreateWindowExA(0, "MainWindowClass", NULL, WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                           0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                           0, 0, 0, NULL);
     assert(hwnd);
+    flush_events( TRUE );
     ok(IsWindowEnabled(hwnd), "window should be enabled\n");
     SetFocus(hwnd);
     SetCapture(hwnd);
@@ -8658,6 +8661,7 @@ static void run_NCRedrawLoop(UINT flags)
 
     UINT loopcount = 0;
 
+    flush_events( TRUE );
     hwnd = CreateWindowA("TestNCRedrawClass", "MainWindow",
                          WS_OVERLAPPEDWINDOW, 0, 0, 200, 100,
                          NULL, NULL, 0, &flags);
@@ -9110,12 +9114,12 @@ static void test_fullscreen(void)
     static const DWORD t_ex_style[] = {
         0, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW
     };
+    RECT rc, virtual_rect, expected_rect;
     WNDCLASSA cls;
     int timeout;
     HWND hwnd;
     int i, j;
     POINT pt;
-    RECT rc;
     HMONITOR hmon;
     LRESULT ret;
 
@@ -9262,6 +9266,49 @@ static void test_fullscreen(void)
     DestroyWindow(hwnd);
 
     UnregisterClassA("fullscreen_class", GetModuleHandleA(NULL));
+
+    /* Test fullscreen windows spanning multiple monitors */
+    if (GetSystemMetrics(SM_CMONITORS) > 1)
+    {
+        /* Test windows covering all monitors */
+        virtual_rect.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        virtual_rect.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        virtual_rect.right = virtual_rect.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        virtual_rect.bottom = virtual_rect.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+        hwnd = CreateWindowA("static", NULL, WS_POPUP | WS_VISIBLE, virtual_rect.left,
+                             virtual_rect.top, virtual_rect.right - virtual_rect.left,
+                             virtual_rect.bottom - virtual_rect.top, NULL, NULL, NULL, NULL);
+        ok(!!hwnd, "CreateWindow failed, error %#lx.\n", GetLastError());
+        flush_events(TRUE);
+
+        GetWindowRect(hwnd, &rc);
+        /* FVWM used by TestBots doesn't support _NET_WM_FULLSCREEN_MONITORS */
+        todo_wine_if(!EqualRect(&rc, &virtual_rect))
+        ok(EqualRect(&rc, &virtual_rect), "Expected %s, got %s.\n",
+           wine_dbgstr_rect(&virtual_rect), wine_dbgstr_rect(&rc));
+        DestroyWindow(hwnd);
+
+        /* Test windows covering one monitor and 1 pixel larger on available sides */
+        expected_rect = mi.rcMonitor;
+        InflateRect(&expected_rect, 1, 1);
+        IntersectRect(&expected_rect, &expected_rect, &virtual_rect);
+        hwnd = CreateWindowA("static", NULL, WS_POPUP | WS_VISIBLE, expected_rect.left,
+                             expected_rect.top, expected_rect.right - expected_rect.left,
+                             expected_rect.bottom - expected_rect.top, NULL, NULL, NULL, NULL);
+        ok(!!hwnd, "CreateWindow failed, error %#lx.\n", GetLastError());
+        flush_events(TRUE);
+
+        GetWindowRect(hwnd, &rc);
+        todo_wine
+        ok(EqualRect(&rc, &expected_rect), "Expected %s, got %s.\n",
+           wine_dbgstr_rect(&expected_rect), wine_dbgstr_rect(&rc));
+        DestroyWindow(hwnd);
+    }
+    else
+    {
+        skip("This test requires at least two monitors.\n");
+    }
 }
 
 static BOOL test_thick_child_got_minmax;
@@ -12495,6 +12542,15 @@ static void test_window_placement(void)
     GetWindowRect(hwnd, &rect);
     ok(EqualRect(&rect, &orig), "got window rect %s\n", wine_dbgstr_rect(&rect));
 
+    ret = SetWindowPlacement(hwnd, &wp);
+    ok(ret, "failed to set window placement, error %lu\n", GetLastError());
+
+    wp.length = 0;
+    SetLastError(0xdeadbeef);
+    ret = SetWindowPlacement(hwnd, &wp);
+    ok(!ret, "SetWindowPlacement should have failed\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %lu\n", GetLastError());
+
     DestroyWindow(hwnd);
 }
 
@@ -12654,7 +12710,7 @@ static void test_arrange_iconic_windows(void)
 static void other_process_proc(HWND hwnd)
 {
     HANDLE window_ready_event, test_done_event;
-    WINDOWPLACEMENT wp;
+    WINDOWPLACEMENT wp = {0};
     DWORD ret;
 
     window_ready_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "test_opw_window");

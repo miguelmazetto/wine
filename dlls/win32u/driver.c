@@ -207,18 +207,13 @@ static INT CDECL nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
     case BITSPIXEL:
     {
         UNICODE_STRING display;
-        DEVMODEW devmode;
         DC *dc;
 
         if (NtGdiGetDeviceCaps( dev->hdc, TECHNOLOGY ) == DT_RASDISPLAY)
         {
             dc = get_nulldrv_dc( dev );
-            memset( &devmode, 0, sizeof(devmode) );
-            devmode.dmSize = sizeof(devmode);
             RtlInitUnicodeString( &display, dc->display );
-            if (NtUserEnumDisplaySettings( &display, ENUM_CURRENT_SETTINGS, &devmode, 0 ) &&
-                (devmode.dmFields & DM_BITSPERPEL) && devmode.dmBitsPerPel)
-                return devmode.dmBitsPerPel;
+            return get_display_depth( &display );
         }
         return 32;
     }
@@ -753,15 +748,20 @@ static void nulldrv_UpdateClipboard(void)
 {
 }
 
-static LONG nulldrv_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd,
+static LONG nulldrv_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd,
                                            DWORD flags, LPVOID lparam )
 {
-    return DISP_CHANGE_FAILED;
+    return E_NOTIMPL; /* use default implementation */
 }
 
-static BOOL nulldrv_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW mode )
+static BOOL nulldrv_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW mode )
 {
-    return FALSE;
+    return FALSE; /* use default implementation */
+}
+
+static INT nulldrv_GetDisplayDepth( LPCWSTR name, BOOL is_primary )
+{
+    return 32;
 }
 
 static BOOL nulldrv_UpdateDisplayDevices( const struct gdi_device_manager *manager, BOOL force, void *param )
@@ -806,13 +806,9 @@ static void nulldrv_GetDC( HDC hdc, HWND hwnd, HWND top_win, const RECT *win_rec
 {
 }
 
-static NTSTATUS nulldrv_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
-                                                     const LARGE_INTEGER *timeout,
-                                                     DWORD mask, DWORD flags )
+static BOOL nulldrv_ProcessEvents( DWORD mask )
 {
-    if (!count && timeout && !timeout->QuadPart) return WAIT_TIMEOUT;
-    return NtWaitForMultipleObjects( count, handles, !(flags & MWMO_WAITALL),
-                                     !!(flags & MWMO_ALERTABLE), timeout );
+    return FALSE;
 }
 
 static void nulldrv_ReleaseDC( HWND hwnd, HDC hdc )
@@ -1066,15 +1062,20 @@ static SHORT loaderdrv_VkKeyScanEx( WCHAR ch, HKL layout )
     return load_driver()->pVkKeyScanEx( ch, layout );
 }
 
-static LONG loaderdrv_ChangeDisplaySettings( LPDEVMODEW displays, HWND hwnd,
+static LONG loaderdrv_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd,
                                              DWORD flags, LPVOID lparam )
 {
-    return load_driver()->pChangeDisplaySettings( displays, hwnd, flags, lparam );
+    return load_driver()->pChangeDisplaySettings( displays, primary_name, hwnd, flags, lparam );
 }
 
-static BOOL loaderdrv_GetCurrentDisplaySettings( LPCWSTR name, LPDEVMODEW mode )
+static BOOL loaderdrv_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW mode )
 {
-    return load_driver()->pGetCurrentDisplaySettings( name, mode );
+    return load_driver()->pGetCurrentDisplaySettings( name, is_primary, mode );
+}
+
+static INT loaderdrv_GetDisplayDepth( LPCWSTR name, BOOL is_primary )
+{
+    return load_driver()->pGetDisplayDepth( name, is_primary );
 }
 
 static void loaderdrv_SetCursor( HCURSOR cursor )
@@ -1179,6 +1180,7 @@ static const struct user_driver_funcs lazy_load_driver =
     /* display modes */
     loaderdrv_ChangeDisplaySettings,
     loaderdrv_GetCurrentDisplaySettings,
+    loaderdrv_GetDisplayDepth,
     loaderdrv_UpdateDisplayDevices,
     /* windowing functions */
     loaderdrv_CreateDesktopWindow,
@@ -1187,7 +1189,7 @@ static const struct user_driver_funcs lazy_load_driver =
     nulldrv_DestroyWindow,
     loaderdrv_FlashWindowEx,
     loaderdrv_GetDC,
-    nulldrv_MsgWaitForMultipleObjectsEx,
+    nulldrv_ProcessEvents,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
     nulldrv_SetCapture,
@@ -1254,6 +1256,7 @@ void __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version
     SET_USER_FUNC(UpdateClipboard);
     SET_USER_FUNC(ChangeDisplaySettings);
     SET_USER_FUNC(GetCurrentDisplaySettings);
+    SET_USER_FUNC(GetDisplayDepth);
     SET_USER_FUNC(UpdateDisplayDevices);
     SET_USER_FUNC(CreateDesktopWindow);
     SET_USER_FUNC(CreateWindow);
@@ -1261,7 +1264,7 @@ void __wine_set_user_driver( const struct user_driver_funcs *funcs, UINT version
     SET_USER_FUNC(DestroyWindow);
     SET_USER_FUNC(FlashWindowEx);
     SET_USER_FUNC(GetDC);
-    SET_USER_FUNC(MsgWaitForMultipleObjectsEx);
+    SET_USER_FUNC(ProcessEvents);
     SET_USER_FUNC(ReleaseDC);
     SET_USER_FUNC(ScrollDC);
     SET_USER_FUNC(SetCapture);

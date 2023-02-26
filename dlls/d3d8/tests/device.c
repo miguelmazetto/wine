@@ -413,9 +413,10 @@ static void test_swapchain(void)
     ok(SUCCEEDED(hr), "Got hr %#lx.\n", hr);
     ok(d3dpp.BackBufferCount == 1, "The back buffer count in the presentparams struct is %d\n", d3dpp.BackBufferCount);
 
+    d3dpp.hDeviceWindow = NULL;
     d3dpp.BackBufferCount  = 1;
     hr = IDirect3DDevice8_CreateAdditionalSwapChain(device, &d3dpp, &swapchain2);
-    ok(SUCCEEDED(hr), "Got hr %#lx.\n", hr);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
 
     d3dpp.BackBufferCount  = 2;
     hr = IDirect3DDevice8_CreateAdditionalSwapChain(device, &d3dpp, &swapchain3);
@@ -2921,7 +2922,6 @@ static void test_wndproc(void)
     {
         {WM_WINDOWPOSCHANGING,  DEVICE_WINDOW,  FALSE,  0},
         {WM_WINDOWPOSCHANGED,   DEVICE_WINDOW,  FALSE,  0},
-        {WM_MOVE,               DEVICE_WINDOW,  FALSE,  0},
         {WM_ACTIVATEAPP,        FOCUS_WINDOW,   TRUE,   TRUE},
         {0,                     0,              FALSE,  0},
     };
@@ -3305,6 +3305,7 @@ static void test_wndproc(void)
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
     }
+    SetForegroundWindow(focus_window);  /* make sure that the window has focus */
 
     filter_messages = NULL;
 
@@ -7774,10 +7775,12 @@ static void test_pixel_format(void)
     PIXELFORMATDESCRIPTOR pfd;
     IDirect3D8 *d3d8 = NULL;
     IDirect3DDevice8 *device = NULL;
-    HWND hwnd, hwnd2;
-    HDC hdc, hdc2;
+    HWND hwnd, hwnd2, hwnd3;
+    HDC hdc, hdc2, hdc3;
+    ULONG refcount;
     HMODULE gl;
     HRESULT hr;
+    BOOL ret;
 
     static const float point[] = {0.0f, 0.0f, 0.0f};
 
@@ -7876,14 +7879,68 @@ static void test_pixel_format(void)
     test_format = GetPixelFormat(hdc2);
     ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
 
-cleanup:
-    if (device)
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+    IDirect3D8_Release(d3d8);
+
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+    test_format = GetPixelFormat(hdc2);
+    ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
+
+    /* Test that creating a device doesn't set a pixel format on a window which
+     * never had one. */
+
+    hwnd3 = create_window();
+    hdc3 = GetDC(hwnd3);
+
+    test_format = GetPixelFormat(hdc3);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d8, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d8, hwnd3, NULL)))
     {
-        UINT refcount = IDirect3DDevice8_Release(device);
-        ok(!refcount, "Device has %u references left.\n", refcount);
+        skip("Failed to create device\n");
+        goto cleanup;
     }
-    if (d3d8)
-        IDirect3D8_Release(d3d8);
+
+    hr = IDirect3DDevice8_SetVertexShader(device, D3DFVF_XYZ);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_BeginScene(device);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_DrawPrimitiveUP(device, D3DPT_POINTLIST, 1, point, 3 * sizeof(float));
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice8_EndScene(device);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+    IDirect3D8_Release(d3d8);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    ret = SetPixelFormat(hdc3, format, &pfd);
+    ok(ret, "Failed to set pixel format %d.\n", format);
+
+    test_format = GetPixelFormat(hdc3);
+    ok(test_format == format, "Expected pixel format %d, got %d.\n", format, test_format);
+
+    ReleaseDC(hwnd3, hdc3);
+    DestroyWindow(hwnd3);
+
+cleanup:
     FreeLibrary(gl);
     ReleaseDC(hwnd2, hdc2);
     ReleaseDC(hwnd, hdc);
@@ -8714,6 +8771,7 @@ static void test_swapchain_parameters(void)
     present_parameters_windowed.Windowed = TRUE;
     present_parameters_windowed.BackBufferCount = 1;
 
+
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         UINT bb_count = tests[i].backbuffer_count ? tests[i].backbuffer_count : 1;
@@ -8721,7 +8779,7 @@ static void test_swapchain_parameters(void)
         memset(&present_parameters, 0, sizeof(present_parameters));
         present_parameters.BackBufferWidth = registry_mode.dmPelsWidth;
         present_parameters.BackBufferHeight = registry_mode.dmPelsHeight;
-        present_parameters.hDeviceWindow = window;
+        present_parameters.hDeviceWindow = NULL;
         present_parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
 
         present_parameters.SwapEffect = tests[i].swap_effect;
@@ -8752,7 +8810,7 @@ static void test_swapchain_parameters(void)
         memset(&present_parameters, 0, sizeof(present_parameters));
         present_parameters.BackBufferWidth = registry_mode.dmPelsWidth;
         present_parameters.BackBufferHeight = registry_mode.dmPelsHeight;
-        present_parameters.hDeviceWindow = window;
+        present_parameters.hDeviceWindow = NULL;
         present_parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
 
         present_parameters.SwapEffect = tests[i].swap_effect;

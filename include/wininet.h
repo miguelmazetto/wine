@@ -16,14 +16,21 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef _WINE_WININET_H_
-#define _WINE_WININET_H_
+#ifndef _WININET_
+#define _WININET_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define INTERNETAPI
+#ifndef INTERNETAPI
+#ifdef _WININET_INTERNAL_
+# define INTERNETAPI
+#else
+# define INTERNETAPI DECLSPEC_IMPORT
+#endif
+#endif
+
 #define BOOLAPI INTERNETAPI BOOL WINAPI
 
 typedef LPVOID HINTERNET;

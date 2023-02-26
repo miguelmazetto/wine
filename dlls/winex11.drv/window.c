@@ -80,6 +80,7 @@ WINE_DECLARE_DEBUG_CHANNEL(systray);
 
 static const unsigned int net_wm_state_atoms[NB_NET_WM_STATES] =
 {
+    XATOM__KDE_NET_WM_STATE_SKIP_SWITCHER,
     XATOM__NET_WM_STATE_FULLSCREEN,
     XATOM__NET_WM_STATE_ABOVE,
     XATOM__NET_WM_STATE_MAXIMIZED_VERT,
@@ -182,7 +183,7 @@ HWND *build_hwnd_list(void)
 {
     NTSTATUS status;
     HWND *list;
-    UINT count = 128;
+    ULONG count = 128;
 
     for (;;)
     {
@@ -624,6 +625,7 @@ static void fetch_icon_data( HWND hwnd, HICON icon_big, HICON icon_small )
     unsigned long *bits;
     Pixmap icon_pixmap, mask_pixmap;
 
+    icon_big = get_icon_info( icon_big, &ii );
     if (!icon_big)
     {
         icon_big = get_icon_info( (HICON)send_message( hwnd, WM_GETICON, ICON_BIG, 0 ), &ii );
@@ -636,6 +638,8 @@ static void fetch_icon_data( HWND hwnd, HICON icon_big, HICON icon_small )
             icon_big = get_icon_info( icon_big, &ii );
         }
     }
+
+    icon_small = get_icon_info( icon_small, &ii_small );
     if (!icon_small)
     {
         icon_small = get_icon_info( (HICON)send_message( hwnd, WM_GETICON, ICON_SMALL, 0 ), &ii_small );
@@ -737,7 +741,7 @@ static void set_size_hints( struct x11drv_win_data *data, DWORD style )
 /***********************************************************************
  *              set_mwm_hints
  */
-static void set_mwm_hints( struct x11drv_win_data *data, DWORD style, DWORD ex_style )
+static void set_mwm_hints( struct x11drv_win_data *data, UINT style, UINT ex_style )
 {
     MwmHints mwm_hints;
 
@@ -970,12 +974,52 @@ void update_user_time( Time time )
     XUnlockDisplay( gdi_display );
 }
 
+/* Update _NET_WM_FULLSCREEN_MONITORS when _NET_WM_STATE_FULLSCREEN is set to support fullscreen
+ * windows spanning multiple monitors */
+static void update_net_wm_fullscreen_monitors( struct x11drv_win_data *data )
+{
+    long monitors[4];
+    XEvent xev;
+
+    if (!(data->net_wm_state & (1 << NET_WM_STATE_FULLSCREEN)) || is_virtual_desktop())
+        return;
+
+    /* If the current display device handler cannot detect dynamic device changes, do not use
+     * _NET_WM_FULLSCREEN_MONITORS because xinerama_get_fullscreen_monitors() may report wrong
+     * indices because of stale xinerama monitor information */
+    if (!X11DRV_DisplayDevices_SupportEventHandlers())
+        return;
+
+    if (!xinerama_get_fullscreen_monitors( &data->whole_rect, monitors ))
+        return;
+
+    if (!data->mapped)
+    {
+        XChangeProperty( data->display, data->whole_window, x11drv_atom(_NET_WM_FULLSCREEN_MONITORS),
+                         XA_CARDINAL, 32, PropModeReplace, (unsigned char *)monitors, 4 );
+    }
+    else
+    {
+        xev.xclient.type = ClientMessage;
+        xev.xclient.window = data->whole_window;
+        xev.xclient.message_type = x11drv_atom(_NET_WM_FULLSCREEN_MONITORS);
+        xev.xclient.serial = 0;
+        xev.xclient.display = data->display;
+        xev.xclient.send_event = True;
+        xev.xclient.format = 32;
+        xev.xclient.data.l[4] = 1;
+        memcpy( xev.xclient.data.l, monitors, sizeof(monitors) );
+        XSendEvent( data->display, root_window, False,
+                    SubstructureRedirectMask | SubstructureNotifyMask, &xev );
+    }
+}
+
 /***********************************************************************
  *     update_net_wm_states
  */
 void update_net_wm_states( struct x11drv_win_data *data )
 {
-    DWORD i, style, ex_style, new_state = 0;
+    UINT i, style, ex_style, new_state = 0;
 
     if (!data->managed) return;
     if (data->whole_window == root_window) return;
@@ -998,8 +1042,9 @@ void update_net_wm_states( struct x11drv_win_data *data )
         new_state |= (1 << NET_WM_STATE_ABOVE);
     if (!data->add_taskbar)
     {
-        if (data->skip_taskbar || (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)))
-            new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
+        if (data->skip_taskbar || (ex_style & WS_EX_NOACTIVATE)
+            || (ex_style & WS_EX_TOOLWINDOW && !(ex_style & WS_EX_APPWINDOW)))
+            new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER) | (1 << KDE_NET_WM_STATE_SKIP_SWITCHER);
         else if (!(ex_style & WS_EX_APPWINDOW) && NtUserGetWindowRelative( data->hwnd, GW_OWNER ))
             new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR);
     }
@@ -1050,6 +1095,7 @@ void update_net_wm_states( struct x11drv_win_data *data )
         }
     }
     data->net_wm_state = new_state;
+    update_net_wm_fullscreen_monitors( data );
 }
 
 /***********************************************************************
@@ -1142,6 +1188,7 @@ static void map_window( HWND hwnd, DWORD new_style )
 
         data->mapped = TRUE;
         data->iconic = (new_style & WS_MINIMIZE) != 0;
+        update_net_wm_fullscreen_monitors( data );
     }
     release_win_data( data );
 }
@@ -1335,9 +1382,9 @@ static void sync_window_position( struct x11drv_win_data *data,
 #endif
 
     TRACE( "win %p/%lx pos %d,%d,%dx%d after %lx changes=%x serial=%lu\n",
-           data->hwnd, data->whole_window, data->whole_rect.left, data->whole_rect.top,
-           data->whole_rect.right - data->whole_rect.left,
-           data->whole_rect.bottom - data->whole_rect.top,
+           data->hwnd, data->whole_window, (int)data->whole_rect.left, (int)data->whole_rect.top,
+           (int)(data->whole_rect.right - data->whole_rect.left),
+           (int)(data->whole_rect.bottom - data->whole_rect.top),
            changes.sibling, mask, data->configure_serial );
 }
 
@@ -1892,6 +1939,9 @@ LRESULT X11DRV_DesktopWindowProc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
     case WM_WINE_ADD_TAB:
         send_notify_message( (HWND)wp, WM_X11DRV_ADD_TAB, 0, 0 );
         break;
+    case WM_DISPLAYCHANGE:
+        X11DRV_resize_desktop();
+        break;
     }
     return NtUserMessageCall( hwnd, msg, wp, lp, 0, NtUserDefWindowProc, FALSE );
 }
@@ -2007,7 +2057,7 @@ HWND create_foreign_window( Display *display, Window xwin )
     Window *xchildren;
     unsigned int nchildren;
     XWindowAttributes attr;
-    DWORD style = WS_CLIPCHILDREN;
+    UINT style = WS_CLIPCHILDREN;
     UNICODE_STRING class_name;
 
     if (!class_registered)
@@ -2021,7 +2071,7 @@ HWND create_foreign_window( Display *display, Window xwin )
         class.lpszClassName = classW;
         RtlInitUnicodeString( &class_name, classW );
         if (!NtUserRegisterClassExWOW( &class, &class_name, &version, NULL, 0, 0, NULL ) &&
-            GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+            RtlGetLastWin32Error() != ERROR_CLASS_ALREADY_EXISTS)
         {
             ERR( "Could not register foreign window class\n" );
             return FALSE;
@@ -2295,6 +2345,7 @@ void X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
 
     escape.code = X11DRV_SET_DRAWABLE;
     escape.mode = IncludeInferiors;
+    escape.drawable = 0;
 
     escape.dc_rect.left         = win_rect->left - top_rect->left;
     escape.dc_rect.top          = win_rect->top - top_rect->top;
@@ -2545,7 +2596,7 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
 {
     struct x11drv_thread_data *thread_data;
     struct x11drv_win_data *data;
-    DWORD new_style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
+    UINT new_style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
     RECT old_window_rect, old_whole_rect, old_client_rect;
     int event_type;
 
@@ -2992,8 +3043,28 @@ LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
             release_win_data( data );
         }
         return 0;
-    case WM_X11DRV_RESIZE_DESKTOP:
-        X11DRV_resize_desktop();
+    case WM_X11DRV_DESKTOP_RESIZED:
+        if ((data = get_win_data( hwnd )))
+        {
+            /* update the full screen state */
+            update_net_wm_states( data );
+
+            if (data->whole_window)
+            {
+                /* sync window position with the new virtual screen rect */
+                POINT old_pos = {.x = data->whole_rect.left - wp, .y = data->whole_rect.top - lp};
+                POINT pos = virtual_screen_to_root( data->whole_rect.left, data->whole_rect.top );
+                XWindowChanges changes = {.x = pos.x, .y = pos.y};
+                UINT mask = 0;
+
+                if (old_pos.x != pos.x) mask |= CWX;
+                if (old_pos.y != pos.y) mask |= CWY;
+
+                if (mask) XReconfigureWMWindow( data->display, data->whole_window, data->vis.screen, mask, &changes );
+            }
+
+            release_win_data( data );
+        }
         return 0;
     case WM_X11DRV_SET_CURSOR:
     {
@@ -3027,7 +3098,7 @@ LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         taskbar_add_tab( hwnd );
         return 0;
     default:
-        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
+        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp );
         return 0;
     }
 }
@@ -3130,7 +3201,7 @@ LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
         if ((WCHAR)lparam) goto failed;  /* got an explicit char */
         if (NtUserGetWindowLongPtrW( hwnd, GWLP_ID )) goto failed;  /* window has a real menu */
         if (!(NtUserGetWindowLongW( hwnd, GWL_STYLE ) & WS_SYSMENU)) goto failed;  /* no system menu */
-        TRACE( "ignoring SC_KEYMENU wp %lx lp %lx\n", wparam, lparam );
+        TRACE( "ignoring SC_KEYMENU wp %lx lp %lx\n", (long)wparam, lparam );
         release_win_data( data );
         return 0;
 

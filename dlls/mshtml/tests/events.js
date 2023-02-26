@@ -198,6 +198,21 @@ sync_test("add_remove_listener", function() {
     calls = "";
     div.click();
     ok(calls === "", "calls = " + calls);
+
+    /* test undefined function argument */
+    div.addEventListener("click", undefined, false);
+
+    calls = "";
+    div.click();
+    ok(calls === "", "calls = " + calls);
+
+    div.addEventListener("click", listener, false);
+    div.removeEventListener("click", undefined);
+
+    calls = "";
+    div.click();
+    ok(calls === "listener,", "calls = " + calls);
+    div.removeEventListener("click", listener);
 });
 
 sync_test("event_phase", function() {
@@ -745,6 +760,7 @@ sync_test("keyboard_event", function() {
     ok(e.location === 0, "location = " + e.location);
     ok(e.detail === 0, "detail = " + e.detail);
     ok(e.which === 0, "which = " + e.which);
+    ok(e.locale === "", "locale = " + e.locale);
 });
 
 sync_test("custom_event", function() {

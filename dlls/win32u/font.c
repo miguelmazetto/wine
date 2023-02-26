@@ -84,9 +84,9 @@ struct gdi_font_face
     SIZE_T        data_size;
     UINT          face_index;
     FONTSIGNATURE fs;
-    DWORD         ntmFlags;
-    DWORD         version;
-    DWORD         flags;                 /* ADDFONT flags */
+    UINT          ntmFlags;
+    UINT          version;
+    UINT          flags;                 /* ADDFONT flags */
     BOOL          scalable;
     struct bitmap_font_size    size;     /* set if face is a bitmap */
     struct gdi_font_family    *family;
@@ -987,7 +987,7 @@ static void dump_gdi_font_list(void)
         LIST_FOR_EACH_ENTRY( face, &family->faces, struct gdi_font_face, entry )
         {
             TRACE( "\t%s\t%s\t%08x", debugstr_w(face->style_name), debugstr_w(face->full_name),
-                   face->fs.fsCsb[0] );
+                   (int)face->fs.fsCsb[0] );
             if (!face->scalable) TRACE(" %d", face->size.height );
             TRACE("\n");
 	}
@@ -1288,9 +1288,9 @@ static void load_face_from_cache( HKEY hkey_family, struct gdi_font_family *fami
                           face->size.x_ppem >> 6, face->size.y_ppem >> 6);
 
                 TRACE("fsCsb = %08x %08x/%08x %08x %08x %08x\n",
-                      face->fs.fsCsb[0], face->fs.fsCsb[1],
-                      face->fs.fsUsb[0], face->fs.fsUsb[1],
-                      face->fs.fsUsb[2], face->fs.fsUsb[3]);
+                      (int)face->fs.fsCsb[0], (int)face->fs.fsCsb[1],
+                      (int)face->fs.fsUsb[0], (int)face->fs.fsUsb[1],
+                      (int)face->fs.fsUsb[2], (int)face->fs.fsUsb[3]);
 
                 release_face( face );
             }
@@ -1500,16 +1500,62 @@ static const WCHAR microsoft_sans_serifW[] =
     {'M','i','c','r','o','s','o','f','t',' ','S','a','n','s',' ','S','e','r','i','f',0};
 static const WCHAR tahomaW[] =
     {'T','a','h','o','m','a',0};
+static const WCHAR ms_gothicW[] =
+    {'M','S',' ','G','o','t','h','i','c',0};
+static const WCHAR ms_p_gothicW[] =
+    {'M','S',' ','P','G','o','t','h','i','c',0};
 static const WCHAR ms_ui_gothicW[] =
     {'M','S',' ','U','I',' ','G','o','t','h','i','c',0};
 static const WCHAR sim_sunW[] =
     {'S','i','m','S','u','n',0};
 static const WCHAR gulimW[] =
     {'G','u','l','i','m',0};
+static const WCHAR ming_li_uW[] =
+    {'M','i','n','g','L','i','U',0};
 static const WCHAR p_ming_li_uW[] =
     {'P','M','i','n','g','L','i','U',0};
+static const WCHAR ming_li_u_hkscsW[] =
+    {'M','i','n','g','L','i','U','_','H','K','S','C','S',0};
+static const WCHAR ming_li_u_ext_bW[] =
+    {'M','i','n','g','L','i','U','-','E','x','t','B',0};
+static const WCHAR p_ming_li_u_ext_bW[] =
+    {'P','M','i','n','g','L','i','U','-','E','x','t','B',0};
+static const WCHAR ming_li_u_hkscs_ext_bW[] =
+    {'M','i','n','g','L','i','U','_','H','K','S','C','S','-','E','x','t','B',0};
 static const WCHAR batangW[] =
     {'B','a','t','a','n','g',0};
+static const WCHAR microsoft_jheng_heiW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',0};
+static const WCHAR microsoft_jheng_hei_boldW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','B','o','l','d',0};
+static const WCHAR microsoft_jheng_hei_uiW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','U','I',0};
+static const WCHAR microsoft_jheng_hei_ui_boldW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','U','I',' ','B','o','l','d',0};
+static const WCHAR microsoft_jheng_hei_ui_lightW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','U','I',' ','L','i','g','h','t',0};
+static const WCHAR yu_gothic_uiW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',0};
+static const WCHAR yu_gothic_ui_boldW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','B','o','l','d',0};
+static const WCHAR yu_gothic_ui_lightW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','L','i','g','h','t',0};
+static const WCHAR yu_gothic_ui_semilightW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','S','e','m','i','l','i','g','h','t',0};
+static const WCHAR yu_gothic_ui_semiboldW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','S','e','m','i','b','o','l','d',0};
+static const WCHAR meiryoW[] =
+    {'M','e','i','r','y','o',0};
+static const WCHAR meiryo_boldW[] =
+    {'M','e','i','r','y','o',' ','B','o','l','d',0};
+static const WCHAR meiryo_uiW[] =
+    {'M','e','i','r','y','o',' ','U','I',0};
+static const WCHAR meiryo_ui_boldW[] =
+    {'M','e','i','r','y','o',' ','U','I',' ','B','o','l','d',0};
+static const WCHAR ms_minchoW[] =
+    {'M','S',' ','M','i','n','c','h','o',0};
+static const WCHAR ms_p_minchoW[] =
+    {'M','S',' ','P','M','i','n','c','h','o',0};
 
 static const WCHAR * const font_links_list[] =
 {
@@ -1549,6 +1595,367 @@ static const struct font_links_defaults_list
     { p_ming_li_uW,
       { p_ming_li_uW, sim_sunW, ms_ui_gothicW, batangW, NULL }
     }
+};
+
+static const char system_link_tahoma_sc[] =
+    "SIMSUN.TTC,SimSun\0"
+    "MINGLIU.TTC,PMingLiu\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "BATANG.TTC,Batang\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_tc[] =
+    "MINGLIU.TTC,PMingLiu\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "BATANG.TTC,Batang\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_jp[] =
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_kr[] =
+    "GULIM.TTC,Gulim\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_non_cjk[] =
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_gothic[] =
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,GulimChe\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_p_gothic[] =
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_ui_gothic[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MEIRYO.TTC,Meiryo\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYHBD.TTC,Microsoft YaHei Bold\0"
+    "MEIRYOB.TTC,Meiryo Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_ui[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MEIRYO.TTC,Meiryo UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_ui_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYHBD.TTC,Microsoft YaHei UI Bold\0"
+    "MEIRYOB.TTC,Meiryo UI Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_ui_light[] =
+    "SEGOEUIL.TTF,Segoe UI Light\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYHL.TTC,Microsoft YaHei UI Light\0"
+    "MEIRYO.TTC,Meiryo UI\0"
+    "MALGUNSL.TTF,Malgun Gothic Semilight\0"
+    "YUGOTHL.TTC,Yu Gothic UI Light\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_p_ming_li_u[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS PMincho\0"
+    "BATANG.TTC,Batang\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u_hkscs[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u_ext_b[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_p_ming_li_u_ext_b[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS PMincho\0"
+    "BATANG.TTC,Batang\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u_hkscs_ext_b[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,MingLiU_HKSCS\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "MSJH.TTC,Microsoft JhengHei\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "MSJHBD.TTC,Microsoft Jhenghei UI Bold\0"
+    "MSYHBD.TTC,Microsoft YaHei Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_light[] =
+    "SEGOEUIL.TTF,Segoe UI Light\0"
+    "MSJHL.TTC,Microsoft Jhenghei UI Light\0"
+    "MSYHL.TTC,Microsoft YaHei Light\0"
+    "MALGUNSL.TTF,Malgun Gothic Semilight\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_semilight[] =
+    "SEGOEUISL.TTF,Segoe UI Semilight\0"
+    "MSJH.TTC,Microsoft Jhenghei UI\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUNSL.TTF,Malgun Gothic Semilight\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_semibold[] =
+    "SEGUISB.TTF,Segoe UI Semibold\0"
+    "MSJH.TTC,Microsoft Jhenghei UI\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJH.TTC,Microsoft JhengHei\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJHBD.TTC,Microsoft Jhenghei Bold\0"
+    "MSYHBD.TTC,Microsoft YaHei Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo_ui[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJH.TTC,Microsoft Jhenghei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo_ui_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJHBD.TTC,Microsoft Jhenghei UI Bold\0"
+    "MSYHBD.TTC,Microsoft YaHei UI Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_mincho[] =
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "BATANG.TTC,Batang\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_p_mincho[] =
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "BATANG.TTC,Batang\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const struct system_link_reg
+{
+    const WCHAR *font_name;
+    BOOL locale_dependent;
+    const char *link_non_cjk;
+    DWORD link_non_cjk_len;
+    const char *link_sc;
+    DWORD link_sc_len;
+    const char *link_tc;
+    DWORD link_tc_len;
+    const char *link_jp;
+    DWORD link_jp_len;
+    const char *link_kr;
+    DWORD link_kr_len;
+}
+default_system_link[] =
+{
+    {
+        tahomaW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        microsoft_sans_serifW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        lucida_sans_unicodeW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    { ms_gothicW,                    FALSE, system_link_ms_gothic,                    sizeof(system_link_ms_gothic) },
+    { ms_p_gothicW,                  FALSE, system_link_ms_p_gothic,                  sizeof(system_link_ms_p_gothic) },
+    { ms_ui_gothicW,                 FALSE, system_link_ms_ui_gothic,                 sizeof(system_link_ms_ui_gothic) },
+    { microsoft_jheng_heiW,          FALSE, system_link_microsoft_jheng_hei,          sizeof(system_link_microsoft_jheng_hei) },
+    { microsoft_jheng_hei_boldW,     FALSE, system_link_microsoft_jheng_hei_bold,     sizeof(system_link_microsoft_jheng_hei_bold) },
+    { microsoft_jheng_hei_uiW,       FALSE, system_link_microsoft_jheng_hei_ui,       sizeof(system_link_microsoft_jheng_hei_ui) },
+    { microsoft_jheng_hei_ui_boldW,  FALSE, system_link_microsoft_jheng_hei_ui_bold,  sizeof(system_link_microsoft_jheng_hei_ui_bold) },
+    { microsoft_jheng_hei_ui_lightW, FALSE, system_link_microsoft_jheng_hei_ui_light, sizeof(system_link_microsoft_jheng_hei_ui_light) },
+    { ming_li_uW,                    FALSE, system_link_ming_li_u,                    sizeof(system_link_ming_li_u) },
+    { p_ming_li_uW,                  FALSE, system_link_p_ming_li_u,                  sizeof(system_link_p_ming_li_u) },
+    { ming_li_u_hkscsW,              FALSE, system_link_ming_li_u_hkscs,              sizeof(system_link_ming_li_u_hkscs) },
+    { ming_li_u_ext_bW,              FALSE, system_link_ming_li_u_ext_b,              sizeof(system_link_ming_li_u_ext_b) },
+    { p_ming_li_u_ext_bW,            FALSE, system_link_p_ming_li_u_ext_b,            sizeof(system_link_p_ming_li_u_ext_b) },
+    { ming_li_u_hkscs_ext_bW,        FALSE, system_link_ming_li_u_hkscs_ext_b,        sizeof(system_link_ming_li_u_hkscs_ext_b) },
+    { yu_gothic_uiW,                 FALSE, system_link_yu_gothic_ui,                 sizeof(system_link_yu_gothic_ui) },
+    { yu_gothic_ui_boldW,            FALSE, system_link_yu_gothic_ui_bold,            sizeof(system_link_yu_gothic_ui_bold) },
+    { yu_gothic_ui_lightW,           FALSE, system_link_yu_gothic_ui_light,           sizeof(system_link_yu_gothic_ui_light) },
+    { yu_gothic_ui_semiboldW,        FALSE, system_link_yu_gothic_ui_semibold,        sizeof(system_link_yu_gothic_ui_semibold) },
+    { yu_gothic_ui_semilightW,       FALSE, system_link_yu_gothic_ui_semilight,       sizeof(system_link_yu_gothic_ui_semilight) },
+    { meiryoW,                       FALSE, system_link_meiryo,                       sizeof(system_link_meiryo) },
+    { meiryo_boldW,                  FALSE, system_link_meiryo_bold,                  sizeof(system_link_meiryo_bold) },
+    { meiryo_uiW,                    FALSE, system_link_meiryo_ui,                    sizeof(system_link_meiryo_ui) },
+    { meiryo_ui_boldW,               FALSE, system_link_meiryo_ui_bold,               sizeof(system_link_meiryo_ui_bold) },
+    { ms_minchoW,                    FALSE, system_link_ms_mincho,                    sizeof(system_link_ms_mincho) },
+    { ms_p_minchoW,                  FALSE, system_link_ms_p_mincho,                  sizeof(system_link_ms_p_mincho) },
 };
 
 static void populate_system_links( const WCHAR *name, const WCHAR * const *values )
@@ -1902,7 +2309,7 @@ static struct font_handle_entry font_handles[MAX_FONT_HANDLES];
 static struct font_handle_entry *next_free;
 static struct font_handle_entry *next_unused = font_handles;
 
-static struct font_handle_entry *handle_entry( DWORD handle )
+static struct font_handle_entry *handle_entry( unsigned int handle )
 {
     unsigned int idx = LOWORD(handle) - FIRST_FONT_HANDLE;
 
@@ -1915,7 +2322,7 @@ static struct font_handle_entry *handle_entry( DWORD handle )
     return NULL;
 }
 
-static struct gdi_font *get_font_from_handle( DWORD handle )
+static struct gdi_font *get_font_from_handle( unsigned int handle )
 {
     struct font_handle_entry *entry = handle_entry( handle );
 
@@ -2299,7 +2706,7 @@ static void *get_GSUB_vert_feature( struct gdi_font *font )
     GSUB_Script *script;
     GSUB_LangSys *language;
     GSUB_Feature *feature;
-    DWORD length = font_funcs->get_font_data( font, MS_GSUB_TAG, 0, NULL, 0 );
+    UINT length = font_funcs->get_font_data( font, MS_GSUB_TAG, 0, NULL, 0 );
 
     if (length == GDI_ERROR) return NULL;
 
@@ -2634,75 +3041,63 @@ static void update_font_association_info(void)
         reg_delete_tree( NULL, font_assoc_keyW, sizeof(font_assoc_keyW) );
 }
 
-static void set_multi_value_key( HKEY hkey, const WCHAR *name, const char *value, DWORD len )
+static void set_multi_value_key( HKEY hkey, const WCHAR *name, const char *value, UINT len )
 {
-    WCHAR valueW[256];
+    WCHAR *valueW;
+
+    if (!(valueW = malloc( len * sizeof(WCHAR) )))
+    {
+        ERR( "malloc of %d * WCHAR failed\n", len );
+        return;
+    }
     ascii_to_unicode( valueW, value, len );
     if (value)
         set_reg_value( hkey, name, REG_MULTI_SZ, valueW, len * sizeof(WCHAR) );
     else if (name)
         reg_delete_value( hkey, name );
+    free( valueW );
 }
 
 static void update_font_system_link_info(void)
 {
-    static const char system_link_simplified_chinese[] =
-        "SIMSUN.TTC,SimSun\0"
-        "MINGLIU.TTC,PMingLiu\0"
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "BATANG.TTC,Batang\0";
-    static const char system_link_traditional_chinese[] =
-        "MINGLIU.TTC,PMingLiu\0"
-        "SIMSUN.TTC,SimSun\0"
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "BATANG.TTC,Batang\0";
-    static const char system_link_japanese[] =
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "MINGLIU.TTC,PMingLiU\0"
-        "SIMSUN.TTC,SimSun\0"
-        "GULIM.TTC,Gulim\0";
-    static const char system_link_korean[] =
-        "GULIM.TTC,Gulim\0"
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "MINGLIU.TTC,PMingLiU\0"
-        "SIMSUN.TTC,SimSun\0";
-    static const char system_link_non_cjk[] =
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "MINGLIU.TTC,PMingLiU\0"
-        "SIMSUN.TTC,SimSun\0"
-        "GULIM.TTC,Gulim\0";
     HKEY hkey;
 
     if ((hkey = reg_create_key( NULL, system_link_keyW, sizeof(system_link_keyW), 0, NULL )))
     {
         const char *link;
-        DWORD len;
+        DWORD len, i;
 
-        switch (ansi_cp.CodePage)
+        for (i = 0; i < ARRAY_SIZE(default_system_link); ++i)
         {
-        case 932:
-            link = system_link_japanese;
-            len = sizeof(system_link_japanese);
-            break;
-        case 936:
-            link = system_link_simplified_chinese;
-            len = sizeof(system_link_simplified_chinese);
-            break;
-        case 949:
-            link = system_link_korean;
-            len = sizeof(system_link_korean);
-            break;
-        case 950:
-            link = system_link_traditional_chinese;
-            len = sizeof(system_link_traditional_chinese);
-            break;
-        default:
-            link = system_link_non_cjk;
-            len = sizeof(system_link_non_cjk);
+            const struct system_link_reg *link_reg = &default_system_link[i];
+
+            link = link_reg->link_non_cjk;
+            len = link_reg->link_non_cjk_len;
+
+            if (link_reg->locale_dependent)
+            {
+                switch (ansi_cp.CodePage)
+                {
+                case 932:
+                    link = link_reg->link_jp;
+                    len = link_reg->link_jp_len;
+                    break;
+                case 936:
+                    link = link_reg->link_sc;
+                    len = link_reg->link_sc_len;
+                    break;
+                case 949:
+                    link = link_reg->link_kr;
+                    len = link_reg->link_kr_len;
+                    break;
+                case 950:
+                    link = link_reg->link_tc;
+                    len = link_reg->link_tc_len;
+                    break;
+                }
+            }
+            set_multi_value_key(hkey, link_reg->font_name, link, len);
         }
-        set_multi_value_key(hkey, lucida_sans_unicodeW, link, len);
-        set_multi_value_key(hkey, microsoft_sans_serifW, link, len);
-        set_multi_value_key(hkey, tahomaW, link, len);
         NtClose( hkey );
     }
 }
@@ -2717,7 +3112,7 @@ static void update_codepage( UINT screen_dpi )
     HKEY hkey;
     DWORD size;
     UINT i;
-    DWORD font_dpi = 0;
+    UINT font_dpi = 0;
     BOOL done = FALSE, cp_match = FALSE;
 
     static const WCHAR log_pixelsW[] = {'L','o','g','P','i','x','e','l','s',0};
@@ -3064,7 +3459,7 @@ static BOOL enum_face_charsets( const struct gdi_font_family *family, struct gdi
 {
     ENUMLOGFONTEXW elf;
     NEWTEXTMETRICEXW ntm;
-    DWORD type, i;
+    UINT type, i;
 
     if (!face->cached_enum_data)
     {
@@ -3111,7 +3506,7 @@ static BOOL enum_face_charsets( const struct gdi_font_family *family, struct gdi
         TRACE( "face %s full %s style %s charset = %d type %d script %s it %d weight %d ntmflags %08x\n",
                debugstr_w(elf.elfLogFont.lfFaceName), debugstr_w(elf.elfFullName), debugstr_w(elf.elfStyle),
                elf.elfLogFont.lfCharSet, type, debugstr_w(elf.elfScript),
-               elf.elfLogFont.lfItalic, elf.elfLogFont.lfWeight, ntm.ntmTm.ntmFlags );
+               elf.elfLogFont.lfItalic, (int)elf.elfLogFont.lfWeight, (int)ntm.ntmTm.ntmFlags );
         /* release section before callback (FIXME) */
         pthread_mutex_unlock( &font_lock );
         if (!proc( &elf.elfLogFont, (TEXTMETRICW *)&ntm, type, lparam )) return FALSE;
@@ -3128,7 +3523,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
     struct gdi_font_family *family;
     struct gdi_font_face *face;
     struct enum_charset enum_charsets[32];
-    DWORD count, charset;
+    UINT count, charset;
 
     charset = lf ? lf->lfCharSet : DEFAULT_CHARSET;
 
@@ -3156,7 +3551,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
             {
                 if (!face_matches( family->family_name, face, face_name )) continue;
                 if (!enum_face_charsets( family, face, enum_charsets, count, proc, lparam, orig_name ))
-                    return FALSE;
+                    return FALSE; /* enum_face_charsets() unlocked font_lock */
 	    }
 	}
     }
@@ -3167,7 +3562,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
         {
             face = LIST_ENTRY( list_head(get_family_face_list(family)), struct gdi_font_face, entry );
             if (!enum_face_charsets( family, face, enum_charsets, count, proc, lparam, NULL ))
-                return FALSE;
+                return FALSE; /* enum_face_charsets() unlocked font_lock */
 	}
     }
     pthread_mutex_unlock( &font_lock );
@@ -3224,6 +3619,60 @@ CPTABLEINFO *get_cptable( WORD cp )
     return &tables[i];
 }
 
+/* Based on NlsValidateLocale */
+const NLS_LOCALE_DATA *get_locale_data( LCID lcid )
+{
+    static const NLS_LOCALE_HEADER *locale_table;
+    static const NLS_LOCALE_LCID_INDEX *lcids_index;
+    int min = 0, max;
+
+    if (!locale_table)
+    {
+        LARGE_INTEGER size;
+        void *addr;
+        LCID lcid;
+        NTSTATUS status;
+        static struct
+        {
+            UINT ctypes;
+            UINT unknown1;
+            UINT unknown2;
+            UINT unknown3;
+            UINT locales;
+            UINT charmaps;
+            UINT geoids;
+            UINT scripts;
+        } *header;
+
+        status = NtInitializeNlsFiles( &addr, &lcid, &size );
+        if (status)
+        {
+            ERR( "Failed to load nls file\n" );
+            return NULL;
+        }
+
+        if (InterlockedCompareExchangePointer( (void **)&header, addr, NULL ))
+            NtUnmapViewOfSection( GetCurrentProcess(), addr );
+
+        locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
+        lcids_index = (const NLS_LOCALE_LCID_INDEX *)((char *)locale_table + locale_table->lcids_offset);
+    }
+
+    max = locale_table->nb_lcids - 1;
+    while (min <= max)
+    {
+        int pos = (min + max) / 2;
+        if (lcid < lcids_index[pos].id) max = pos - 1;
+        else if (lcid > lcids_index[pos].id) min = pos + 1;
+        else
+        {
+            ULONG offset = locale_table->locales_offset + pos * locale_table->locale_size;
+            return (const NLS_LOCALE_DATA *)((const char *)locale_table + offset);
+        }
+    }
+    return NULL;
+}
+
 DWORD win32u_wctomb( CPTABLEINFO *info, char *dst, DWORD dstlen, const WCHAR *src, DWORD srclen )
 {
     DWORD ret;
@@ -3268,6 +3717,34 @@ DWORD win32u_mbtowc( CPTABLEINFO *info, WCHAR *dst, DWORD dstlen, const char *sr
         RtlCustomCPToUnicodeN( info, dst, dstlen * sizeof(WCHAR), &ret, src, srclen );
 
     return ret / sizeof(WCHAR);
+}
+
+DWORD win32u_mbtowc_size( CPTABLEINFO *info, const char *src, DWORD srclen )
+{
+    DWORD ret;
+
+    if (info->CodePage == CP_UTF8)
+    {
+        RtlUTF8ToUnicodeN( NULL, 0, &ret, src, srclen );
+        ret /= sizeof(WCHAR);
+    }
+    else if (info->DBCSCodePage)
+    {
+        for (ret = 0; srclen; srclen--, src++, ret++)
+        {
+            if (info->DBCSOffsets[(unsigned char)*src] && srclen > 1)
+            {
+                src++;
+                srclen--;
+            }
+        }
+    }
+    else
+    {
+        ret = srclen;
+    }
+
+    return ret;
 }
 
 static BOOL wc_to_index( UINT cp, WCHAR wc, unsigned char *dst, BOOL allow_default )
@@ -4012,12 +4489,12 @@ static void get_nearest_charset( const WCHAR *family_name, struct gdi_font_face 
         if (face->fs.fsCsb[0] & fs0)
         {
 	    if (translate_charset_info(&fs0, csi, TCI_SRCFONTSIG)) return;
-            FIXME("TCI failing on %x\n", fs0);
+            FIXME("TCI failing on %x\n", (int)fs0);
 	}
     }
 
     FIXME("returning DEFAULT_CHARSET face->fs.fsCsb[0] = %08x file = %s\n",
-	  face->fs.fsCsb[0], debugstr_w(face->file));
+	  (int)face->fs.fsCsb[0], debugstr_w(face->file));
     csi->ciACP = ansi_cp.CodePage;
     csi->ciCharset = DEFAULT_CHARSET;
 }
@@ -4148,9 +4625,9 @@ static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
         lf.lfWidth = abs(lf.lfWidth);
 
         TRACE( "%s, h=%d, it=%d, weight=%d, PandF=%02x, charset=%d orient %d escapement %d\n",
-               debugstr_w(lf.lfFaceName), lf.lfHeight, lf.lfItalic,
-               lf.lfWeight, lf.lfPitchAndFamily, lf.lfCharSet, lf.lfOrientation,
-               lf.lfEscapement );
+               debugstr_w(lf.lfFaceName), (int)lf.lfHeight, lf.lfItalic,
+               (int)lf.lfWeight, lf.lfPitchAndFamily, lf.lfCharSet, (int)lf.lfOrientation,
+               (int)lf.lfEscapement );
 
         if (dc->attr->graphics_mode == GM_ADVANCED)
         {
@@ -4195,7 +4672,7 @@ static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
             }
             *aa_flags = font_funcs->get_aa_flags( font, *aa_flags, antialias_fakes );
         }
-        TRACE( "%p %s %d aa %x\n", hfont, debugstr_w(lf.lfFaceName), lf.lfHeight, *aa_flags );
+        TRACE( "%p %s %d aa %x\n", hfont, debugstr_w(lf.lfFaceName), (int)lf.lfHeight, *aa_flags );
         pthread_mutex_unlock( &font_lock );
     }
     physdev->font = font;
@@ -4546,8 +5023,8 @@ HFONT WINAPI NtGdiHfontCreate( const void *logfont, ULONG size, ULONG type,
     }
 
     TRACE("(%d %d %d %d %x %d %x %d %d) %s %s %s %s => %p\n",
-          plf->lfHeight, plf->lfWidth,
-          plf->lfEscapement, plf->lfOrientation,
+          (int)plf->lfHeight, (int)plf->lfWidth,
+          (int)plf->lfEscapement, (int)plf->lfOrientation,
           plf->lfPitchAndFamily,
           plf->lfOutPrecision, plf->lfClipPrecision,
           plf->lfQuality, plf->lfCharSet,
@@ -4565,7 +5042,7 @@ HFONT WINAPI NtGdiHfontCreate( const void *logfont, ULONG size, ULONG type,
 
 static DWORD get_associated_charset_info(void)
 {
-    static DWORD associated_charset = -1;
+    static int associated_charset = -1;
 
     if (associated_charset == -1)
     {
@@ -4884,7 +5361,8 @@ BOOL WINAPI NtGdiGetTextExtentExW( HDC hdc, const WCHAR *str, INT count, INT max
     if (pos != buffer && pos != dxs) free( pos );
     release_dc_ptr( dc );
 
-    TRACE("(%p, %s, %d) returning %dx%d\n", hdc, debugstr_wn(str,count), max_ext, size->cx, size->cy );
+    TRACE("(%p, %s, %d) returning %dx%d\n", hdc, debugstr_wn(str,count),
+          max_ext, (int)size->cx, (int)size->cy );
     return ret;
 }
 
@@ -4929,15 +5407,15 @@ BOOL WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags )
           "    Ascent = %i\n"
           "    Descent = %i\n"
           "    Height = %i\n",
-          metrics->tmWeight, metrics->tmFirstChar, metrics->tmAveCharWidth,
-          metrics->tmItalic, metrics->tmLastChar, metrics->tmMaxCharWidth,
-          metrics->tmUnderlined, metrics->tmDefaultChar, metrics->tmOverhang,
+          (int)metrics->tmWeight, metrics->tmFirstChar, (int)metrics->tmAveCharWidth,
+          metrics->tmItalic, metrics->tmLastChar, (int)metrics->tmMaxCharWidth,
+          metrics->tmUnderlined, metrics->tmDefaultChar, (int)metrics->tmOverhang,
           metrics->tmStruckOut, metrics->tmBreakChar, metrics->tmCharSet,
           metrics->tmPitchAndFamily,
-          metrics->tmInternalLeading,
-          metrics->tmAscent,
-          metrics->tmDescent,
-          metrics->tmHeight );
+          (int)metrics->tmInternalLeading,
+          (int)metrics->tmAscent,
+          (int)metrics->tmDescent,
+          (int)metrics->tmHeight );
     }
     release_dc_ptr( dc );
     return ret;
@@ -5843,7 +6321,7 @@ DWORD WINAPI NtGdiGetGlyphOutline( HDC hdc, UINT ch, UINT format, GLYPHMETRICS *
     DWORD ret;
     PHYSDEV dev;
 
-    TRACE( "(%p, %04x, %04x, %p, %d, %p, %p)\n", hdc, ch, format, metrics, size, buffer, mat2 );
+    TRACE( "(%p, %04x, %04x, %p, %d, %p, %p)\n", hdc, ch, format, metrics, (int)size, buffer, mat2 );
 
     if (!mat2) return GDI_ERROR;
 
@@ -5889,7 +6367,7 @@ DWORD WINAPI NtGdiGetKerningPairs( HDC hdc, DWORD count, KERNINGPAIR *kern_pair 
     DWORD ret;
     PHYSDEV dev;
 
-    TRACE( "(%p,%d,%p)\n", hdc, count, kern_pair );
+    TRACE( "(%p,%d,%p)\n", hdc, (int)count, kern_pair );
 
     if (!count && kern_pair)
     {
@@ -5945,7 +6423,7 @@ DWORD WINAPI NtGdiGetGlyphIndicesW( HDC hdc, const WCHAR *str, INT count,
     PHYSDEV dev;
     DWORD ret;
 
-    TRACE( "(%p, %s, %d, %p, 0x%x)\n", hdc, debugstr_wn(str, count), count, indices, flags );
+    TRACE( "(%p, %s, %d, %p, 0x%x)\n", hdc, debugstr_wn(str, count), count, indices, (int)flags );
 
     if(!dc) return GDI_ERROR;
 
@@ -6291,11 +6769,11 @@ static HKEY open_hkcu(void)
         return 0;
 
     sid = ((TOKEN_USER *)sid_data)->User.Sid;
-    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
-                 MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
+    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", (int)sid->Revision,
+            (int)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
                            MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
     for (i = 0; i < sid->SubAuthorityCount; i++)
-        len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+        len += sprintf( buffer + len, "-%u", (int)sid->SubAuthority[i] );
     ascii_to_unicode( bufferW, buffer, len + 1 );
 
     return reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
@@ -6605,7 +7083,7 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
 /***********************************************************************
  *           DrawTextW    (win32u.so)
  */
-INT WINAPI DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
+INT WINAPI DECLSPEC_HIDDEN DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
 {
     struct draw_text_params *params;
     ULONG ret_len, size;

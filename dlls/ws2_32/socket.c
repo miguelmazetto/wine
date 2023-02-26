@@ -582,8 +582,7 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-        return !NtQueryVirtualMemory( GetCurrentProcess(), instance, MemoryWineUnixFuncs,
-                                      &ws_unix_handle, sizeof(ws_unix_handle), NULL );
+        return !__wine_init_unix_call();
 
     case DLL_THREAD_DETACH:
         free_per_thread_data();
@@ -1815,6 +1814,11 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
 
         case SO_REUSEADDR:
             ret = server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_REUSEADDR, optval, optlen );
+            if (!ret && *optlen < sizeof(DWORD)) *optlen = 1;
+            return ret;
+
+        case SO_EXCLUSIVEADDRUSE:
+            ret = server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_EXCLUSIVEADDRUSE, optval, optlen );
             if (!ret && *optlen < sizeof(DWORD)) *optlen = 1;
             return ret;
 
@@ -3168,9 +3172,9 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         }
 
         case SO_ERROR:
-            FIXME( "SO_ERROR, stub!\n" );
-            SetLastError( WSAENOPROTOOPT );
-            return -1;
+            FIXME( "SO_ERROR, stub.\n" );
+            SetLastError( ERROR_SUCCESS );
+            return 0;
 
         case SO_KEEPALIVE:
             if (optlen <= 0 || !optval)
@@ -3215,6 +3219,15 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
             memcpy( &value, optval, min( optlen, sizeof(value) ));
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_REUSEADDR, (char *)&value, sizeof(value) );
 
+        case SO_EXCLUSIVEADDRUSE:
+            if (!optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_EXCLUSIVEADDRUSE, (char *)&value, sizeof(value) );
+
         case SO_SNDBUF:
             if (optlen < 0) optlen = 4;
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_SNDBUF, optval, optlen );
@@ -3238,12 +3251,6 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
                 return -1;
             }
             SetLastError( ERROR_SUCCESS );
-            return 0;
-
-        /* Stops two sockets from being bound to the same port. Always happens
-         * on unix systems, so just drop it. */
-        case SO_EXCLUSIVEADDRUSE:
-            TRACE("Ignoring SO_EXCLUSIVEADDRUSE, is always set.\n");
             return 0;
 
         /* After a ConnectEx call succeeds, the socket can't be used with half of the
@@ -3702,7 +3709,9 @@ BOOL WINAPI WSAGetOverlappedResult( SOCKET s, LPWSAOVERLAPPED lpOverlapped,
         return FALSE;
     }
 
-    status = lpOverlapped->Internal;
+    /* Paired with the write-release in set_async_iosb() in ntdll; see the
+     * latter for details. */
+    status = ReadAcquire( (LONG *)&lpOverlapped->Internal );
     if (status == STATUS_PENDING)
     {
         if (!fWait)
@@ -3714,6 +3723,8 @@ BOOL WINAPI WSAGetOverlappedResult( SOCKET s, LPWSAOVERLAPPED lpOverlapped,
         if (WaitForSingleObject( lpOverlapped->hEvent ? lpOverlapped->hEvent : SOCKET2HANDLE(s),
                                  INFINITE ) == WAIT_FAILED)
             return FALSE;
+        /* We don't need to give this load acquire semantics; the wait above
+         * already guarantees that the IOSB and output buffer are filled. */
         status = lpOverlapped->Internal;
     }
 
@@ -3812,7 +3823,7 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
 {
     struct afd_create_params create_params;
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING string;
+    UNICODE_STRING string = RTL_CONSTANT_STRING(L"\\Device\\Afd");
     IO_STATUS_BLOCK io;
     NTSTATUS status;
     HANDLE handle;
@@ -3890,7 +3901,6 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         }
     }
 
-    RtlInitUnicodeString(&string, L"\\Device\\Afd");
     InitializeObjectAttributes(&attr, &string, (flags & WSA_FLAG_NO_HANDLE_INHERIT) ? 0 : OBJ_INHERIT, NULL, NULL);
     if ((status = NtOpenFile(&handle, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, &attr,
             &io, 0, (flags & WSA_FLAG_OVERLAPPED) ? 0 : FILE_SYNCHRONOUS_IO_NONALERT)))
@@ -4024,6 +4034,12 @@ int WINAPI WSARecv(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
                    LPWSAOVERLAPPED lpOverlapped,
                    LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
 {
+    if (!dwBufferCount)
+    {
+        SetLastError( WSAEINVAL );
+        return -1;
+    }
+
     return WS2_recv_base(s, lpBuffers, dwBufferCount, NumberOfBytesReceived, lpFlags,
                        NULL, NULL, lpOverlapped, lpCompletionRoutine, NULL);
 }

@@ -85,6 +85,8 @@ struct session
     HANDLE unload_event;
     DWORD secure_protocols;
     DWORD passport_flags;
+    unsigned int websocket_receive_buffer_size;
+    unsigned int websocket_send_buffer_size;
 };
 
 struct connect
@@ -104,6 +106,7 @@ struct connect
 struct netconn
 {
     struct list entry;
+    LONG refs;
     int socket;
     struct sockaddr_storage sockaddr;
     BOOL secure; /* SSL active on connection? */
@@ -171,6 +174,19 @@ enum request_flags
     REQUEST_FLAG_WEBSOCKET_UPGRADE = 0x01,
 };
 
+enum request_response_state
+{
+    REQUEST_RESPONSE_STATE_NONE,
+    REQUEST_RESPONSE_STATE_SENDING_REQUEST,
+    REQUEST_RESPONSE_STATE_READ_RESPONSE_QUEUED,
+    REQUEST_RESPONSE_STATE_REQUEST_SENT,
+    REQUEST_RESPONSE_STATE_READ_RESPONSE_QUEUED_REQUEST_SENT,
+    REQUEST_RESPONSE_STATE_REPLY_RECEIVED,
+    REQUEST_RESPONSE_STATE_READ_RESPONSE_QUEUED_REPLY_RECEIVED,
+    REQUEST_RESPONSE_RECURSIVE_REQUEST,
+    REQUEST_RESPONSE_STATE_RESPONSE_RECEIVED,
+};
+
 struct request
 {
     struct object_header hdr;
@@ -215,6 +231,11 @@ struct request
         WCHAR *username;
         WCHAR *password;
     } creds[TARGET_MAX][SCHEME_MAX];
+    unsigned int websocket_receive_buffer_size;
+    unsigned int websocket_send_buffer_size, websocket_set_send_buffer_size;
+    int read_reply_len;
+    DWORD read_reply_status;
+    enum request_response_state state;
 };
 
 enum socket_state
@@ -251,7 +272,9 @@ enum fragment_type
 struct socket
 {
     struct object_header hdr;
-    struct request *request;
+    struct netconn *netconn;
+    int keepalive_interval;
+    unsigned int send_buffer_size;
     enum socket_state state;
     struct queue send_q;
     struct queue recv_q;
@@ -269,6 +292,8 @@ struct socket
     unsigned int send_remaining_size;
     unsigned int bytes_in_send_frame_buffer;
     unsigned int client_buffer_offset;
+    char *read_buffer;
+    unsigned int bytes_in_read_buffer;
     SRWLOCK send_lock;
     volatile LONG pending_noncontrol_send;
     enum fragment_type sending_fragment_type;
@@ -364,7 +389,8 @@ void close_connection( struct request * ) DECLSPEC_HIDDEN;
 void init_queue( struct queue *queue ) DECLSPEC_HIDDEN;
 void stop_queue( struct queue * ) DECLSPEC_HIDDEN;
 
-void netconn_close( struct netconn * ) DECLSPEC_HIDDEN;
+void netconn_addref( struct netconn * ) DECLSPEC_HIDDEN;
+void netconn_release( struct netconn * ) DECLSPEC_HIDDEN;
 DWORD netconn_create( struct hostdata *, const struct sockaddr_storage *, int, struct netconn ** ) DECLSPEC_HIDDEN;
 void netconn_unload( void ) DECLSPEC_HIDDEN;
 ULONG netconn_query_data_available( struct netconn * ) DECLSPEC_HIDDEN;
@@ -391,16 +417,6 @@ DWORD process_header( struct request *, const WCHAR *, const WCHAR *, DWORD, BOO
 
 extern HRESULT WinHttpRequest_create( void ** ) DECLSPEC_HIDDEN;
 void release_typelib( void ) DECLSPEC_HIDDEN;
-
-static inline WCHAR *strdupW( const WCHAR *src )
-{
-    WCHAR *dst;
-
-    if (!src) return NULL;
-    dst = malloc( (lstrlenW( src ) + 1) * sizeof(WCHAR) );
-    if (dst) lstrcpyW( dst, src );
-    return dst;
-}
 
 static inline WCHAR *strdupAW( const char *src )
 {
@@ -443,6 +459,6 @@ static inline char *strdupWA_sized( const WCHAR *src, DWORD size )
 
 extern HINSTANCE winhttp_instance DECLSPEC_HIDDEN;
 
-#define MAX_FRAME_BUFFER_SIZE 65536
+#define MIN_WEBSOCKET_SEND_BUFFER_SIZE 16
 
 #endif /* _WINE_WINHTTP_PRIVATE_H_ */

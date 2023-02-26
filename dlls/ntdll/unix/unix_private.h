@@ -27,6 +27,7 @@
 #include "wine/unixlib.h"
 #include "wine/server.h"
 #include "wine/list.h"
+#include "wine/debug.h"
 
 struct msghdr;
 
@@ -40,6 +41,9 @@ static const WORD current_machine = IMAGE_FILE_MACHINE_ARMNT;
 static const WORD current_machine = IMAGE_FILE_MACHINE_ARM64;
 #endif
 extern WORD native_machine DECLSPEC_HIDDEN;
+
+extern const unixlib_entry_t __wine_unix_call_funcs[] DECLSPEC_HIDDEN;
+extern const unixlib_entry_t __wine_unix_call_wow64_funcs[] DECLSPEC_HIDDEN;
 
 static const BOOL is_win64 = (sizeof(void *) > sizeof(int));
 
@@ -71,7 +75,7 @@ static inline struct ntdll_thread_data *ntdll_get_thread_data(void)
 }
 
 /* returns TRUE if the async is complete; FALSE if it should be restarted */
-typedef BOOL async_callback_t( void *user, ULONG_PTR *info, NTSTATUS *status );
+typedef BOOL async_callback_t( void *user, ULONG_PTR *info, unsigned int *status );
 
 struct async_fileio
 {
@@ -103,9 +107,6 @@ extern void     (WINAPI *p__wine_ctrl_routine)(void *) DECLSPEC_HIDDEN;
 extern SYSTEM_DLL_INIT_BLOCK *pLdrSystemDllInitBlock DECLSPEC_HIDDEN;
 extern LONGLONG CDECL fast_RtlGetSystemTimePrecise(void) DECLSPEC_HIDDEN;
 
-extern NTSTATUS CDECL unwind_builtin_dll( ULONG type, struct _DISPATCHER_CONTEXT *dispatch,
-                                          CONTEXT *context ) DECLSPEC_HIDDEN;
-
 struct _FILE_FS_DEVICE_INFORMATION;
 
 extern const char wine_build[] DECLSPEC_HIDDEN;
@@ -117,6 +118,7 @@ extern const char *config_dir DECLSPEC_HIDDEN;
 extern const char *user_name DECLSPEC_HIDDEN;
 extern const char **dll_paths DECLSPEC_HIDDEN;
 extern const char **system_dll_paths DECLSPEC_HIDDEN;
+extern pthread_key_t teb_key DECLSPEC_HIDDEN;
 extern PEB *peb DECLSPEC_HIDDEN;
 extern USHORT *uctable DECLSPEC_HIDDEN;
 extern USHORT *lctable DECLSPEC_HIDDEN;
@@ -187,8 +189,9 @@ extern void wait_suspend( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance ) DECLSPEC_HIDDEN;
 extern NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USHORT machine ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT machine ) DECLSPEC_HIDDEN;
-extern NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
-                                         data_size_t *ret_len ) DECLSPEC_HIDDEN;
+extern unsigned int alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
+                                             data_size_t *ret_len ) DECLSPEC_HIDDEN;
+extern NTSTATUS system_time_precise( void *args ) DECLSPEC_HIDDEN;
 
 extern void *anon_mmap_fixed( void *start, size_t size, int prot, int flags ) DECLSPEC_HIDDEN;
 extern void *anon_mmap_alloc( size_t size, int prot ) DECLSPEC_HIDDEN;
@@ -221,9 +224,9 @@ extern void virtual_set_force_exec( BOOL enable ) DECLSPEC_HIDDEN;
 extern void virtual_set_large_address_space(void) DECLSPEC_HIDDEN;
 extern void virtual_fill_image_information( const pe_image_info_t *pe_info,
                                             SECTION_IMAGE_INFORMATION *info ) DECLSPEC_HIDDEN;
-extern void release_builtin_module( void *module ) DECLSPEC_HIDDEN;
 extern void *get_builtin_so_handle( void *module ) DECLSPEC_HIDDEN;
 extern NTSTATUS load_builtin_unixlib( void *module, const char *name ) DECLSPEC_HIDDEN;
+extern NTSTATUS unwind_builtin_dll( void *args ) DECLSPEC_HIDDEN;
 
 extern NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len ) DECLSPEC_HIDDEN;
 extern void *get_native_context( CONTEXT *context ) DECLSPEC_HIDDEN;
@@ -233,7 +236,6 @@ extern BOOL get_thread_times( int unix_pid, int unix_tid, LARGE_INTEGER *kernel_
 extern void signal_init_threading(void) DECLSPEC_HIDDEN;
 extern NTSTATUS signal_alloc_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_free_thread( TEB *teb ) DECLSPEC_HIDDEN;
-extern void signal_init_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_process(void) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg,
                                                    BOOL suspend, TEB *teb ) DECLSPEC_HIDDEN;
@@ -241,6 +243,7 @@ extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int),
 extern SYSTEM_SERVICE_TABLE KeServiceDescriptorTable[4] DECLSPEC_HIDDEN;
 extern void __wine_syscall_dispatcher(void) DECLSPEC_HIDDEN;
 extern void WINAPI DECLSPEC_NORETURN __wine_syscall_dispatcher_return( void *frame, ULONG_PTR retval ) DECLSPEC_HIDDEN;
+extern void __wine_unix_call_dispatcher(void) DECLSPEC_HIDDEN;
 extern NTSTATUS signal_set_full_context( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size ) DECLSPEC_HIDDEN;
 extern NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size ) DECLSPEC_HIDDEN;
@@ -248,21 +251,21 @@ extern void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid ) DECLSPEC_HIDD
 extern NTSTATUS open_hkcu_key( const char *path, HANDLE *key ) DECLSPEC_HIDDEN;
 
 extern NTSTATUS cdrom_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                       IO_STATUS_BLOCK *io, ULONG code, void *in_buffer,
-                                       ULONG in_size, void *out_buffer, ULONG out_size ) DECLSPEC_HIDDEN;
+                                       IO_STATUS_BLOCK *io, UINT code, void *in_buffer,
+                                       UINT in_size, void *out_buffer, UINT out_size ) DECLSPEC_HIDDEN;
 extern NTSTATUS serial_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                        IO_STATUS_BLOCK *io, ULONG code, void *in_buffer,
-                                        ULONG in_size, void *out_buffer, ULONG out_size ) DECLSPEC_HIDDEN;
+                                        IO_STATUS_BLOCK *io, UINT code, void *in_buffer,
+                                        UINT in_size, void *out_buffer, UINT out_size ) DECLSPEC_HIDDEN;
 extern NTSTATUS serial_FlushBuffersFile( int fd ) DECLSPEC_HIDDEN;
 extern NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user, IO_STATUS_BLOCK *io,
-                            ULONG code, void *in_buffer, ULONG in_size, void *out_buffer, ULONG out_size ) DECLSPEC_HIDDEN;
+                            UINT code, void *in_buffer, UINT in_size, void *out_buffer, UINT out_size ) DECLSPEC_HIDDEN;
 extern NTSTATUS sock_read( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
                            IO_STATUS_BLOCK *io, void *buffer, ULONG length ) DECLSPEC_HIDDEN;
 extern NTSTATUS sock_write( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
                             IO_STATUS_BLOCK *io, const void *buffer, ULONG length ) DECLSPEC_HIDDEN;
 extern NTSTATUS tape_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, void *apc_user,
-                                      IO_STATUS_BLOCK *io, ULONG code, void *in_buffer,
-                                      ULONG in_size, void *out_buffer, ULONG out_size ) DECLSPEC_HIDDEN;
+                                      IO_STATUS_BLOCK *io, UINT code, void *in_buffer,
+                                      UINT in_size, void *out_buffer, UINT out_size ) DECLSPEC_HIDDEN;
 
 extern struct async_fileio *alloc_fileio( DWORD size, async_callback_t callback, HANDLE handle ) DECLSPEC_HIDDEN;
 extern void release_fileio( struct async_fileio *io ) DECLSPEC_HIDDEN;
@@ -278,7 +281,20 @@ extern NTSTATUS get_device_info( int fd, struct _FILE_FS_DEVICE_INFORMATION *inf
 extern void init_files(void) DECLSPEC_HIDDEN;
 extern void init_cpu_info(void) DECLSPEC_HIDDEN;
 extern void add_completion( HANDLE handle, ULONG_PTR value, NTSTATUS status, ULONG info, BOOL async ) DECLSPEC_HIDDEN;
-extern void set_async_direct_result( HANDLE *optional_handle, NTSTATUS status, ULONG_PTR information, BOOL mark_pending );
+extern void set_async_direct_result( HANDLE *async_handle, NTSTATUS status, ULONG_PTR information, BOOL mark_pending ) DECLSPEC_HIDDEN;
+
+extern NTSTATUS unixcall_wine_dbg_write( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS unixcall_wine_server_call( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS unixcall_wine_server_fd_to_handle( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS unixcall_wine_server_handle_to_fd( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS unixcall_wine_spawnvp( void *args ) DECLSPEC_HIDDEN;
+#ifdef _WIN64
+extern NTSTATUS wow64_wine_dbg_write( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS wow64_wine_server_call( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS wow64_wine_server_fd_to_handle( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS wow64_wine_server_handle_to_fd( void *args ) DECLSPEC_HIDDEN;
+extern NTSTATUS wow64_wine_spawnvp( void *args ) DECLSPEC_HIDDEN;
+#endif
 
 extern void dbg_init(void) DECLSPEC_HIDDEN;
 
@@ -363,6 +379,24 @@ static inline void set_async_iosb( client_ptr_t iosb, NTSTATUS status, ULONG_PTR
 {
     if (!iosb) return;
 
+    /* GetOverlappedResult() and WSAGetOverlappedResult() expect that if the
+     * status is written, that the information (and buffer, which was written
+     * earlier from the async callback) will be available. Hence we need to
+     * store the status last, with release semantics to ensure that those
+     * writes are visible. This release is paired with a read-acquire in
+     * GetOverlappedResult() and WSAGetOverlappedResult():
+     *
+     * CPU 0 (set_async_iosb)            CPU 1 (GetOverlappedResultEx)
+     * ===========================       ===========================
+     * write buffer
+     * write Information
+     * WriteRelease(Status) <--------.
+     *                               |
+     *                               |
+     *                (paired with)  `-> ReadAcquire(Status)
+     *                                   read Information
+     */
+
     if (in_wow64_call())
     {
         struct iosb32
@@ -370,18 +404,18 @@ static inline void set_async_iosb( client_ptr_t iosb, NTSTATUS status, ULONG_PTR
             NTSTATUS Status;
             ULONG    Information;
         } *io = wine_server_get_ptr( iosb );
-        io->Status = status;
         io->Information = info;
+        WriteRelease( &io->Status, status );
     }
     else
     {
         IO_STATUS_BLOCK *io = wine_server_get_ptr( iosb );
-#ifdef NONAMELESSUNION
-        io->u.Status = status;
-#else
-        io->Status = status;
-#endif
         io->Information = info;
+#ifdef NONAMELESSUNION
+        WriteRelease( &io->u.Status, status );
+#else
+        WriteRelease( &io->Status, status );
+#endif
     }
 }
 

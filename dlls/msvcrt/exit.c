@@ -51,7 +51,10 @@ static CRITICAL_SECTION MSVCRT_onexit_cs = { &MSVCRT_onexit_cs_debug, -1, 0, 0, 
 extern int MSVCRT_app_type;
 extern wchar_t *MSVCRT__wpgmptr;
 
+#if _MSVCR_VER > 0 || defined(_DEBUG)
 static unsigned int MSVCRT_abort_behavior =  _WRITE_ABORT_MSG | _CALL_REPORTFAULT;
+#endif
+
 static int MSVCRT_error_mode = _OUT_TO_DEFAULT;
 
 void (*CDECL _aexit_rtn)(int) = _exit;
@@ -250,6 +253,7 @@ void CDECL abort(void)
 {
   TRACE("()\n");
 
+#if (_MSVCR_VER > 0 && _MSVCR_VER < 100) || _MSVCR_VER == 120 || defined(_DEBUG)
   if (MSVCRT_abort_behavior & _WRITE_ABORT_MSG)
   {
     if ((MSVCRT_error_mode == _OUT_TO_MSGBOX) ||
@@ -260,6 +264,7 @@ void CDECL abort(void)
     else
       _cputs("\nabnormal program termination\n");
   }
+#endif
   raise(SIGABRT);
   /* in case raise() returns */
   _exit(3);
@@ -285,7 +290,7 @@ unsigned int CDECL _set_abort_behavior(unsigned int flags, unsigned int mask)
 /*********************************************************************
  *              _wassert (MSVCRT.@)
  */
-void CDECL _wassert(const wchar_t* str, const wchar_t* file, unsigned int line)
+void DECLSPEC_NORETURN CDECL _wassert(const wchar_t* str, const wchar_t* file, unsigned int line)
 {
   TRACE("(%s,%s,%d)\n", debugstr_w(str), debugstr_w(file), line);
 
@@ -306,7 +311,7 @@ void CDECL _wassert(const wchar_t* str, const wchar_t* file, unsigned int line)
 /*********************************************************************
  *		_assert (MSVCRT.@)
  */
-void CDECL _assert(const char* str, const char* file, unsigned int line)
+void DECLSPEC_NORETURN CDECL _assert(const char* str, const char* file, unsigned int line)
 {
     wchar_t strW[1024], fileW[1024];
 

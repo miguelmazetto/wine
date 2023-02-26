@@ -1209,6 +1209,7 @@ static void test_set_getsockopt(void)
         {AF_INET, SOCK_STREAM, SOL_SOCKET, SO_DONTROUTE, TRUE, {1, 1, 1}, {0}, TRUE},
         {AF_INET, SOCK_STREAM, SOL_SOCKET, SO_RCVTIMEO, FALSE, {1, 2, 4}, {0}, TRUE},
         {AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR, TRUE, {1, 1, 4}, {0, 0xdead0001, 0}, TRUE, TRUE},
+        {AF_INET, SOCK_STREAM, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, TRUE, {1, 1, 4}, {0, 0xdead0001, 0}, TRUE, TRUE},
         {AF_INET, SOCK_STREAM, SOL_SOCKET, SO_SNDBUF, FALSE, {1, 2, 4}, {0xdeadbe00, 0xdead0000}, TRUE},
         {AF_INET, SOCK_STREAM, SOL_SOCKET, SO_SNDTIMEO, FALSE, {1, 2, 4}, {0}, TRUE},
         {AF_INET, SOCK_STREAM, SOL_SOCKET, SO_OPENTYPE, FALSE, {1, 2, 4}, {0}, TRUE},
@@ -1430,7 +1431,6 @@ static void test_set_getsockopt(void)
     SetLastError(0xdeadbeef);
     i = 1234;
     err = setsockopt(s, SOL_SOCKET, SO_ERROR, (char *) &i, size);
-    todo_wine
     ok( !err && !WSAGetLastError(),
         "got %d with %d (expected 0 with 0)\n",
         err, WSAGetLastError());
@@ -2013,79 +2013,399 @@ static void test_set_getsockopt(void)
     }
 }
 
-static void test_so_reuseaddr(void)
+static void test_reuseaddr(void)
 {
-    struct sockaddr_in saddr;
-    SOCKET s1,s2;
-    unsigned int rc,reuse;
-    int size;
-    DWORD err;
+    static struct sockaddr_in6 saddr_in6_any, saddr_in6_loopback;
+    static struct sockaddr_in6 saddr_in6_any_v4mapped, saddr_in6_loopback_v4mapped;
+    static struct sockaddr_in saddr_in_any, saddr_in_loopback;
 
-    saddr.sin_family      = AF_INET;
-    saddr.sin_port        = htons(SERVERPORT+1);
-    saddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    s1=socket(AF_INET, SOCK_STREAM, 0);
-    ok(s1!=INVALID_SOCKET, "socket() failed error: %d\n", WSAGetLastError());
-    rc = bind(s1, (struct sockaddr*)&saddr, sizeof(saddr));
-    ok(rc!=SOCKET_ERROR, "bind(s1) failed error: %d\n", WSAGetLastError());
-
-    s2=socket(AF_INET, SOCK_STREAM, 0);
-    ok(s2!=INVALID_SOCKET, "socket() failed error: %d\n", WSAGetLastError());
-
-    reuse=0x1234;
-    size=sizeof(reuse);
-    rc=getsockopt(s2, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, &size );
-    ok(rc==0 && reuse==0,"wrong result in getsockopt(SO_REUSEADDR): rc=%d reuse=%d\n",rc,reuse);
-
-    rc = bind(s2, (struct sockaddr*)&saddr, sizeof(saddr));
-    ok(rc==SOCKET_ERROR, "bind() succeeded\n");
-
-    reuse = 1;
-    rc = setsockopt(s2, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
-    ok(rc==0, "setsockopt() failed error: %d\n", WSAGetLastError());
-
-    /* On Win2k3 and above, all SO_REUSEADDR seems to do is to allow binding to
-     * a port immediately after closing another socket on that port, so
-     * basically following the BSD socket semantics here. */
-    rc = bind(s2, (struct sockaddr*)&saddr, sizeof(saddr));
-    if(rc==0)
+    static const struct
     {
-        int s3=socket(AF_INET, SOCK_STREAM, 0), s4;
+        int domain;
+        struct sockaddr *addr_any;
+        struct sockaddr *addr_loopback;
+        socklen_t addrlen;
+    }
+    tests[] =
+    {
+        { AF_INET, (struct sockaddr *)&saddr_in_any, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_any) },
+        { AF_INET6, (struct sockaddr *)&saddr_in6_any, (struct sockaddr *)&saddr_in6_loopback, sizeof(saddr_in6_any) },
+    };
+    static const struct
+    {
+        struct
+        {
+            int domain;
+            struct sockaddr *addr;
+            socklen_t addrlen;
+            BOOL exclusive;
+        }
+        s[2];
+        int error;
+    }
+    tests_exclusive[] =
+    {
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, }},
+            WSAEACCES,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_any, sizeof(saddr_in6_any), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, }},
+            WSAEACCES,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), TRUE, }},
+            NOERROR,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), TRUE, }},
+            WSAEACCES,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, }},
+            NOERROR,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), TRUE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, },
+            { AF_INET6, (struct sockaddr *)&saddr_in6_any, sizeof(saddr_in6_any), TRUE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_loopback, sizeof(saddr_in6_loopback), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), TRUE, }},
+            NOERROR,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_loopback, sizeof(saddr_in6_loopback), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), TRUE, }},
+            NOERROR,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_loopback_v4mapped, sizeof(saddr_in6_loopback_v4mapped), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), TRUE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_any, sizeof(saddr_in6_any), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, }},
+            WSAEACCES,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_any, sizeof(saddr_in6_any), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), TRUE, }},
+            NOERROR,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), TRUE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_any, sizeof(saddr_in6_any), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, }},
+            NOERROR,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_any_v4mapped, sizeof(saddr_in6_any_v4mapped), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_any, sizeof(saddr_in_any), FALSE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_loopback_v4mapped, sizeof(saddr_in6_loopback_v4mapped), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, },
+            { AF_INET6, (struct sockaddr *)&saddr_in6_loopback_v4mapped, sizeof(saddr_in6_loopback_v4mapped), FALSE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET6, (struct sockaddr *)&saddr_in6_loopback, sizeof(saddr_in6_loopback), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), TRUE, }},
+            NOERROR,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), TRUE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, }},
+            WSAEADDRINUSE,
+        },
+        {
+            {{ AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), FALSE, },
+            { AF_INET, (struct sockaddr *)&saddr_in_loopback, sizeof(saddr_in_loopback), TRUE, }},
+            WSAEADDRINUSE,
+        },
+    };
 
-        /* If we could bind again in the same port this is Windows version <= XP.
-         * Lets test if we can really connect to one of them. */
-        set_blocking(s1, FALSE);
-        set_blocking(s2, FALSE);
-        rc = listen(s1, 1);
-        ok(!rc, "listen() failed with error: %d\n", WSAGetLastError());
-        rc = listen(s2, 1);
-        ok(!rc, "listen() failed with error: %d\n", WSAGetLastError());
-        rc = connect(s3, (struct sockaddr*)&saddr, sizeof(saddr));
-        ok(!rc, "connecting to accepting socket failed %d\n", WSAGetLastError());
+    unsigned int rc, reuse, value;
+    struct sockaddr_storage saddr;
+    SOCKET s1, s2, s3, s4;
+    unsigned int i, j;
+    int size;
 
-        /* the delivery of the connection is random so we need to try on both sockets */
-        size = sizeof(saddr);
-        s4 = accept(s1, (struct sockaddr*)&saddr, &size);
-        if(s4 == INVALID_SOCKET)
-            s4 = accept(s2, (struct sockaddr*)&saddr, &size);
-        ok(s4 != INVALID_SOCKET, "none of the listening sockets could get the connection\n");
+    saddr_in_any.sin_family = AF_INET;
+    saddr_in_any.sin_port = htons(SERVERPORT + 1);
+    saddr_in_any.sin_addr.s_addr = htonl(INADDR_ANY);
+    saddr_in_loopback = saddr_in_any;
+    saddr_in_loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    saddr_in6_any.sin6_family = AF_INET6;
+    saddr_in6_any.sin6_port = htons(SERVERPORT + 1);
+    memset( &saddr_in6_any.sin6_addr, 0, sizeof(saddr_in6_any.sin6_addr) );
+    saddr_in6_loopback = saddr_in6_any;
+    inet_pton(AF_INET6, "::1", &saddr_in6_loopback.sin6_addr);
+
+    saddr_in6_loopback_v4mapped = saddr_in6_any;
+    rc = inet_pton(AF_INET6, "::ffff:127.0.0.1", &saddr_in6_loopback_v4mapped.sin6_addr);
+    ok(rc, "got error %d.\n", WSAGetLastError());
+
+    saddr_in6_any_v4mapped = saddr_in6_any;
+    rc = inet_pton(AF_INET6, "::ffff:0.0.0.0", &saddr_in6_any_v4mapped.sin6_addr);
+    ok(rc, "got error %d.\n", WSAGetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        winetest_push_context("test %u", i);
+
+        /* Test with SO_REUSEADDR on second socket only. */
+        s1=socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s1 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s1, tests[i].addr_loopback, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s2 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s2 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        reuse = 1;
+        rc = setsockopt(s2, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s2, tests[i].addr_loopback, tests[i].addrlen);
+        ok(rc == SOCKET_ERROR, "got rc %d.\n", rc);
+        ok(WSAGetLastError() == WSAEACCES, "got error %d.\n", WSAGetLastError());
 
         closesocket(s1);
+        closesocket(s2);
+
+        /* Test with SO_REUSEADDR on both sockets. */
+        s1 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s1 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        reuse = 1;
+        rc = setsockopt(s1, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s1, tests[i].addr_loopback, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s2 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s2 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        reuse = 0x1234;
+        size = sizeof(reuse);
+        rc = getsockopt(s2, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, &size);
+        ok(!rc && !reuse,"got rc %d, reuse %d.\n", rc, reuse);
+
+        rc = bind(s2, tests[i].addr_loopback, tests[i].addrlen);
+        ok(rc == SOCKET_ERROR, "got rc %d, error %d.\n", rc, WSAGetLastError());
+
+        reuse = 1;
+        rc = setsockopt(s2, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s2, tests[i].addr_loopback, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s3 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s3 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        /* Test if we can really connect to one of them. */
+        rc = listen(s1, 1);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+        rc = listen(s2, 1);
+        todo_wine ok(!rc, "got error %d.\n", WSAGetLastError());
+        rc = connect(s3, tests[i].addr_loopback, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        /* The connection is delivered to the first socket. */
+        size = tests[i].addrlen;
+        s4 = accept(s1, (struct sockaddr *)&saddr, &size);
+        ok(s4 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        closesocket(s1);
+        closesocket(s2);
         closesocket(s3);
         closesocket(s4);
-    }
-    else
-    {
-        err = WSAGetLastError();
-        ok(err==WSAEACCES, "expected 10013, got %ld\n", err);
+
+        /* Test binding and listening on any addr together with loopback, any addr first. */
+        s1 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s1 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s1, tests[i].addr_any, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        rc = listen(s1, 1);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s2 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s2 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s2, tests[i].addr_loopback, tests[i].addrlen);
+        todo_wine ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        rc = listen(s2, 1);
+        todo_wine ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s3 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s3 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = connect(s3, tests[i].addr_loopback, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        size = tests[i].addrlen;
+        s4 = accept(s2, (struct sockaddr *)&saddr, &size);
+        todo_wine ok(s4 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
 
         closesocket(s1);
-        rc = bind(s2, (struct sockaddr*)&saddr, sizeof(saddr));
-        ok(rc==0, "bind() failed error: %d\n", WSAGetLastError());
+        closesocket(s2);
+        closesocket(s3);
+        closesocket(s4);
+
+        /* Test binding and listening on any addr together with loopback, loopback addr first. */
+
+        s1 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s1 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s1, tests[i].addr_loopback, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        rc = listen(s1, 1);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s2 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s2 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s2, tests[i].addr_any, tests[i].addrlen);
+        todo_wine ok(!rc, "got rc %d, error %d.\n", rc, WSAGetLastError());
+
+        rc = listen(s2, 1);
+        todo_wine ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s3 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s3 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = connect(s3, tests[i].addr_loopback, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+        size = tests[i].addrlen;
+        s4 = accept(s1, (struct sockaddr *)&saddr, &size);
+
+        ok(s4 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        closesocket(s1);
+        closesocket(s2);
+        closesocket(s3);
+        closesocket(s4);
+
+        /* Test binding to INADDR_ANY on two sockets. */
+        s1 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s1 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s1, tests[i].addr_any, tests[i].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        s2 = socket(tests[i].domain, SOCK_STREAM, 0);
+        ok(s2 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s2, tests[i].addr_any, tests[i].addrlen);
+        ok(rc == SOCKET_ERROR && WSAGetLastError() == WSAEADDRINUSE, "got rc %d, error %d.\n", rc, WSAGetLastError());
+
+        closesocket(s1);
+        closesocket(s2);
+
+        winetest_pop_context();
     }
 
-    closesocket(s2);
+    /* SO_REUSEADDR and SO_EXCLUSIVEADDRUSE are mutually exclusive. */
+    s1 = socket(AF_INET, SOCK_STREAM, 0);
+    ok(s1 != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+    value = 1;
+    rc = setsockopt(s1, SOL_SOCKET, SO_REUSEADDR, (char*)&value, sizeof(value));
+    ok(!rc, "got error %d.\n", WSAGetLastError());
+
+    value = 1;
+    rc = setsockopt(s1, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (char*)&value, sizeof(value));
+    ok(rc == SOCKET_ERROR && WSAGetLastError() == WSAEINVAL, "got rc %d, error %d.\n", rc, WSAGetLastError());
+
+    value = 0;
+    rc = setsockopt(s1, SOL_SOCKET, SO_REUSEADDR, (char*)&value, sizeof(value));
+
+    value = 1;
+    rc = setsockopt(s1, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (char*)&value, sizeof(value));
+    ok(!rc, "got error %d.\n", WSAGetLastError());
+
+    value = 1;
+    rc = setsockopt(s1, SOL_SOCKET, SO_REUSEADDR, (char*)&value, sizeof(value));
+    ok(rc == SOCKET_ERROR && WSAGetLastError() == WSAEINVAL, "got rc %d, error %d.\n", rc, WSAGetLastError());
+
+    closesocket(s1);
+
+    /* Test SO_EXCLUSIVEADDRUSE. */
+    for (i = 0; i < ARRAY_SIZE(tests_exclusive); ++i)
+    {
+        SOCKET s[2];
+
+        winetest_push_context("test %u", i);
+
+        for (j = 0; j < 2; ++j)
+        {
+            s[j] = socket(tests_exclusive[i].s[j].domain, SOCK_STREAM, 0);
+            ok(s[j] != INVALID_SOCKET, "got error %d.\n", WSAGetLastError());
+
+            if (tests_exclusive[i].s[j].exclusive)
+            {
+                value = 1;
+                rc = setsockopt(s[j], SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (char*)&value, sizeof(value));
+                ok(!rc, "got error %d.\n", WSAGetLastError());
+            }
+            if (tests_exclusive[i].s[j].domain == AF_INET6)
+            {
+                value = 0;
+                rc = setsockopt(s[j], IPPROTO_IPV6, IPV6_V6ONLY, (char*)&value, sizeof(value));
+                ok(!rc, "got error %d.\n", WSAGetLastError());
+            }
+        }
+        rc = bind(s[0], tests_exclusive[i].s[0].addr, tests_exclusive[i].s[0].addrlen);
+        ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        rc = bind(s[1], tests_exclusive[i].s[1].addr, tests_exclusive[i].s[1].addrlen);
+
+        if (tests_exclusive[i].error)
+            ok(rc == SOCKET_ERROR && WSAGetLastError() == tests_exclusive[i].error,
+                    "got rc %d, error %d, expected error %d.\n", rc, WSAGetLastError(), tests_exclusive[i].error);
+        else
+            ok(!rc, "got error %d.\n", WSAGetLastError());
+
+        closesocket(s[0]);
+        closesocket(s[1]);
+        winetest_pop_context();
+    }
 }
 
 #define IP_PKTINFO_LEN (sizeof(WSACMSGHDR) + WSA_CMSG_ALIGN(sizeof(struct in_pktinfo)))
@@ -2683,6 +3003,7 @@ static void test_WSASocket(void)
         int family, type, protocol;
         DWORD error;
         int ret_family, ret_type, ret_protocol;
+        int ret_family_alt;
     }
     tests[] =
     {
@@ -2710,14 +3031,14 @@ static void test_WSASocket(void)
         {AF_INET,   SOCK_DGRAM,  IPPROTO_TCP, WSAEPROTONOSUPPORT},
 
         /* 19 */
-        {AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0, AF_INET, SOCK_STREAM, IPPROTO_TCP},
+        {AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0, AF_INET, SOCK_STREAM, IPPROTO_TCP, AF_INET6 /* win11 */},
         {AF_UNSPEC, SOCK_STREAM, 0xdead,      WSAEPROTONOSUPPORT},
         {AF_UNSPEC, 0xdead,      IPPROTO_UDP, WSAESOCKTNOSUPPORT},
         {AF_UNSPEC, SOCK_STREAM, 0,           WSAEINVAL},
         {AF_UNSPEC, SOCK_DGRAM,  0,           WSAEINVAL},
         {AF_UNSPEC, 0xdead,      0,           WSAEINVAL},
-        {AF_UNSPEC, 0,           IPPROTO_TCP, 0, AF_INET, SOCK_STREAM, IPPROTO_TCP},
-        {AF_UNSPEC, 0,           IPPROTO_UDP, 0, AF_INET, SOCK_DGRAM,  IPPROTO_UDP},
+        {AF_UNSPEC, 0,           IPPROTO_TCP, 0, AF_INET, SOCK_STREAM, IPPROTO_TCP, AF_INET6 /* win11 */},
+        {AF_UNSPEC, 0,           IPPROTO_UDP, 0, AF_INET, SOCK_DGRAM,  IPPROTO_UDP, AF_INET6 /* win11 */},
         {AF_UNSPEC, 0,           0xdead,      WSAEPROTONOSUPPORT},
         {AF_UNSPEC, 0,           0,           WSAEINVAL},
     };
@@ -2741,7 +3062,9 @@ static void test_WSASocket(void)
             size = sizeof(info);
             err = getsockopt( sock, SOL_SOCKET, SO_PROTOCOL_INFOA, (char *)&info, &size );
             ok(!err, "Test %u: getsockopt failed, error %u\n", i, WSAGetLastError());
-            ok(info.iAddressFamily == tests[i].ret_family, "Test %u: got wrong family %d\n", i, info.iAddressFamily);
+            ok(info.iAddressFamily == tests[i].ret_family ||
+               (tests[i].ret_family_alt && info.iAddressFamily == tests[i].ret_family_alt),
+               "Test %u: got wrong family %d\n", i, info.iAddressFamily);
             ok(info.iSocketType == tests[i].ret_type, "Test %u: got wrong type %d\n", i, info.iSocketType);
             ok(info.iProtocol == tests[i].ret_protocol, "Test %u: got wrong protocol %d\n", i, info.iProtocol);
 
@@ -2949,9 +3272,8 @@ static void test_WSASocket(void)
         size = sizeof(info);
         err = getsockopt(sock, SOL_SOCKET, SO_PROTOCOL_INFOW, (char *) &info, &size);
         ok(!err,"got error %d\n", WSAGetLastError());
-        ok(!wcscmp(info.szProtocol, L"MSAFD Tcpip [RAW/IP]")
-                || broken(!wcscmp(info.szProtocol, L"MSAFD-Tcpip [RAW/IP]")) /* Some Win7 machines. */,
-                "got szProtocol %s.\n", debugstr_w(info.szProtocol));
+        /* Protocol name in info.szProtocol is not entirely consistent across Windows versions and
+         * locales, so not testing it. */
         ok(info.iAddressFamily == AF_INET, "got iAddressFamily %d.\n", info.iAddressFamily);
         ok(info.iSocketType == SOCK_RAW, "got iSocketType %d.\n", info.iSocketType);
         ok(info.iMaxSockAddr == 0x10, "got iMaxSockAddr %d.\n", info.iMaxSockAddr);
@@ -4030,13 +4352,7 @@ static void test_select(void)
 
         ret = connect(fdWrite, (const struct sockaddr *)&invalid_addr, sizeof(invalid_addr));
         ok(ret == -1, "got %d\n", ret);
-        todo_wine ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        if (WSAGetLastError() == WSAECONNABORTED)
-        {
-            ret = connect(fdWrite, (const struct sockaddr *)&invalid_addr, sizeof(invalid_addr));
-            ok(ret == -1, "got %d\n", ret);
-            ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        }
+        ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
 
         len = sizeof(id);
         id = 0xdeadbeef;
@@ -4058,13 +4374,7 @@ static void test_select(void)
         ok(!ret, "got error %u\n", WSAGetLastError());
         ret = connect(fdWrite, (const struct sockaddr *)&address, sizeof(address));
         ok(ret == -1, "got %d\n", ret);
-        todo_wine ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        if (WSAGetLastError() == WSAECONNABORTED)
-        {
-            ret = connect(fdWrite, (const struct sockaddr *)&address, sizeof(address));
-            ok(ret == -1, "got %d\n", ret);
-            ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
-        }
+        ok(WSAGetLastError() == WSAEWOULDBLOCK, "got error %u\n", WSAGetLastError());
 
         FD_ZERO_ALL();
         FD_SET(fdWrite, &readfds);
@@ -4440,6 +4750,88 @@ done:
         CloseHandle(server_ready);
     if (server_socket != INVALID_SOCKET)
         closesocket(server_socket);
+}
+
+/* Test what socket state is inherited from the listening socket by accept(). */
+static void test_accept_inheritance(void)
+{
+    struct sockaddr_in addr, destaddr;
+    SOCKET listener, server, client;
+    struct linger linger;
+    int ret, len, value;
+    unsigned int i;
+
+    static const struct
+    {
+        int optname;
+        int optval;
+        int value;
+    }
+    int_tests[] =
+    {
+        {SOL_SOCKET, SO_REUSEADDR, 1},
+        {SOL_SOCKET, SO_KEEPALIVE, 1},
+        {SOL_SOCKET, SO_OOBINLINE, 1},
+        {SOL_SOCKET, SO_SNDBUF, 0x123},
+        {SOL_SOCKET, SO_RCVBUF, 0x123},
+        {SOL_SOCKET, SO_SNDTIMEO, 0x123},
+        {SOL_SOCKET, SO_RCVTIMEO, 0x123},
+        {IPPROTO_TCP, TCP_NODELAY, 1},
+    };
+
+    listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(listener != -1, "failed to create socket, error %u\n", WSAGetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(int_tests); ++i)
+    {
+        ret = setsockopt(listener, int_tests[i].optname, int_tests[i].optval,
+                (char *)&int_tests[i].value, sizeof(int_tests[i].value));
+        ok(!ret, "test %u: got error %u\n", i, WSAGetLastError());
+    }
+
+    linger.l_onoff = 1;
+    linger.l_linger = 555;
+    ret = setsockopt(listener, SOL_SOCKET, SO_LINGER, (char *)&linger, sizeof(linger));
+    ok(!ret, "got error %u\n", WSAGetLastError());
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    ret = bind(listener, (struct sockaddr *)&addr, sizeof(addr));
+    ok(!ret, "failed to bind, error %u\n", WSAGetLastError());
+    len = sizeof(destaddr);
+    ret = getsockname(listener, (struct sockaddr *)&destaddr, &len);
+    ok(!ret, "failed to get address, error %u\n", WSAGetLastError());
+
+    ret = listen(listener, 1);
+    ok(!ret, "failed to listen, error %u\n", WSAGetLastError());
+
+    client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(client != -1, "failed to create socket, error %u\n", WSAGetLastError());
+    ret = connect(client, (struct sockaddr *)&destaddr, sizeof(destaddr));
+    ok(!ret, "failed to connect, error %u\n", WSAGetLastError());
+    server = accept(listener, NULL, NULL);
+    ok(server != -1, "failed to accept, error %u\n", WSAGetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(int_tests); ++i)
+    {
+        value = 0;
+        len = sizeof(value);
+        ret = getsockopt(server, int_tests[i].optname, int_tests[i].optval, (char *)&value, &len);
+        ok(!ret, "test %u: got error %u\n", i, WSAGetLastError());
+        ok(value == int_tests[i].value, "test %u: got value %#x\n", i, value);
+    }
+
+    len = sizeof(linger);
+    memset(&linger, 0, sizeof(linger));
+    ret = getsockopt(server, SOL_SOCKET, SO_LINGER, (char *)&linger, &len);
+    ok(!ret, "got error %u\n", WSAGetLastError());
+    ok(linger.l_onoff == 1, "got on/off %u\n", linger.l_onoff);
+    ok(linger.l_linger == 555, "got linger %u\n", linger.l_onoff);
+
+    close(server);
+    close(client);
+    close(listener);
 }
 
 static void test_extendedSocketOptions(void)
@@ -7916,7 +8308,6 @@ static void test_connect(void)
 
     closesocket(connector);
     closesocket(acceptor);
-    closesocket(listener);
 
     tcp_socketpair(&connector, &acceptor);
 
@@ -7976,6 +8367,30 @@ static void test_connect(void)
 
     WSACloseEvent(overlapped.hEvent);
     closesocket(connector);
+
+    /* Test connect after previous connect attempt failure. */
+    connector = socket(AF_INET, SOCK_STREAM, 0);
+    ok(connector != INVALID_SOCKET, "failed to create socket, error %u\n", WSAGetLastError());
+
+    conaddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    conaddress.sin_port = htons(255);
+    iret = connect(connector, (struct sockaddr *)&conaddress, sizeof(conaddress));
+    ok(iret == -1, "connection succeeded.\n");
+
+    ok(WSAGetLastError() == WSAECONNREFUSED, "got error %u\n", WSAGetLastError());
+    set_blocking( connector, FALSE );
+    iret = getsockname(listener, (struct sockaddr*)&address, &addrlen);
+    ok(!iret, "failed to get address, error %u\n", WSAGetLastError());
+
+    iret = connect(connector, (struct sockaddr *)&address, sizeof(address));
+    ok(iret == -1 && WSAGetLastError() == WSAEWOULDBLOCK, "unexpected iret %d, error %d.\n",
+            iret, WSAGetLastError());
+    acceptor = accept(listener, NULL, NULL);
+    ok(acceptor != INVALID_SOCKET, "could not accept socket error %d\n", WSAGetLastError());
+
+    closesocket(acceptor);
+    closesocket(connector);
+    closesocket(listener);
 }
 
 static void test_AcceptEx(void)
@@ -11805,6 +12220,8 @@ static void test_bind(void)
     {
         const IP_ADAPTER_UNICAST_ADDRESS *unicast_addr;
 
+        if (adapter->OperStatus != IfOperStatusUp) continue;
+
         for (unicast_addr = adapter->FirstUnicastAddress; unicast_addr != NULL; unicast_addr = unicast_addr->Next)
         {
             short family = unicast_addr->Address.lpSockaddr->sa_family;
@@ -12208,11 +12625,15 @@ static void test_nonblocking_async_recv(void)
 
     memset(buffer, 0, sizeof(buffer));
     WSASetLastError(0xdeadbeef);
+    overlapped.Internal = 0xdeadbeef;
+    overlapped.InternalHigh = 0xdeadbeef;
     ret = WSARecv(client, &wsabuf, 1, NULL, &flags, &overlapped, NULL);
     ok(ret == -1, "got %d\n", ret);
     ok(WSAGetLastError() == ERROR_IO_PENDING, "got error %u\n", WSAGetLastError());
     ret = WaitForSingleObject((HANDLE)client, 0);
     ok(ret == WAIT_TIMEOUT, "expected timeout\n");
+    ok(overlapped.Internal == STATUS_PENDING, "got status %#lx\n", (NTSTATUS)overlapped.Internal);
+    ok(overlapped.InternalHigh == 0xdeadbeef, "got size %Iu\n", overlapped.InternalHigh);
 
     ret = send(server, "data", 4, 0);
     ok(ret == 4, "got %d\n", ret);
@@ -12401,14 +12822,14 @@ static void test_empty_recv(void)
     WSASetLastError(0xdeadbeef);
     ret = WSARecv(client, NULL, 0, NULL, &flags, &overlapped, NULL);
     ok(ret == -1, "expected failure\n");
-    todo_wine ok(WSAGetLastError() == WSAEINVAL, "got error %u\n", WSAGetLastError());
+    ok(WSAGetLastError() == WSAEINVAL, "got error %u\n", WSAGetLastError());
 
     wsabuf.buf = buffer;
     wsabuf.len = 0;
     WSASetLastError(0xdeadbeef);
     ret = WSARecv(client, &wsabuf, 0, NULL, &flags, &overlapped, NULL);
     ok(ret == -1, "expected failure\n");
-    todo_wine ok(WSAGetLastError() == WSAEINVAL, "got error %u\n", WSAGetLastError());
+    ok(WSAGetLastError() == WSAEINVAL, "got error %u\n", WSAGetLastError());
 
     WSASetLastError(0xdeadbeef);
     ret = WSARecv(client, &wsabuf, 1, NULL, &flags, &overlapped, NULL);
@@ -13261,7 +13682,7 @@ START_TEST( sock )
     Init();
 
     test_set_getsockopt();
-    test_so_reuseaddr();
+    test_reuseaddr();
     test_ip_pktinfo();
     test_ipv4_cmsg();
     test_ipv6_cmsg();
@@ -13284,6 +13705,7 @@ START_TEST( sock )
     test_listen();
     test_select();
     test_accept();
+    test_accept_inheritance();
     test_getpeername();
     test_getsockname();
 

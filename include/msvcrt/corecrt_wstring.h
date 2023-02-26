@@ -7,6 +7,7 @@
 #define _WSTRING_DEFINED
 
 #include <corecrt.h>
+#include <corecrt_malloc.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +30,7 @@ static inline void* memccpy(void *s1, const void *s2, int c, size_t n) { return 
 
 _ACRTIMP void*   __cdecl memmove(void*,const void*,size_t);
 
-_ACRTIMP wchar_t* __cdecl _wcsdup(const wchar_t*);
+_ACRTIMP wchar_t* __cdecl _wcsdup(const wchar_t*) __WINE_DEALLOC(free) __WINE_MALLOC;
 _ACRTIMP int      __cdecl _wcsicmp(const wchar_t*,const wchar_t*);
 _ACRTIMP int      __cdecl _wcsicoll(const wchar_t*,const wchar_t*);
 _ACRTIMP int      __cdecl _wcsicoll_l(const wchar_t*, const wchar_t*, _locale_t);
@@ -59,6 +60,7 @@ _ACRTIMP errno_t  __cdecl wcscpy_s(wchar_t*,size_t,const wchar_t*);
 _ACRTIMP size_t   __cdecl wcscspn(const wchar_t*,const wchar_t*);
 _ACRTIMP size_t   __cdecl wcslen(const wchar_t*);
 _ACRTIMP wchar_t* __cdecl wcsncat(wchar_t*,const wchar_t*,size_t);
+_ACRTIMP errno_t  __cdecl wcsncat_s(wchar_t*,size_t,const wchar_t*,size_t);
 _ACRTIMP int      __cdecl wcsncmp(const wchar_t*,const wchar_t*,size_t);
 _ACRTIMP wchar_t* __cdecl wcsncpy(wchar_t*,const wchar_t*,size_t);
 _ACRTIMP errno_t  __cdecl wcsncpy_s(wchar_t*,size_t,const wchar_t*,size_t);

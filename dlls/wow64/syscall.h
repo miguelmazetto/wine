@@ -40,9 +40,11 @@
     SYSCALL_ENTRY( NtCallbackReturn ) \
     SYSCALL_ENTRY( NtCancelIoFile ) \
     SYSCALL_ENTRY( NtCancelIoFileEx ) \
+    SYSCALL_ENTRY( NtCancelSynchronousIoFile ) \
     SYSCALL_ENTRY( NtCancelTimer ) \
     SYSCALL_ENTRY( NtClearEvent ) \
     SYSCALL_ENTRY( NtClose ) \
+    SYSCALL_ENTRY( NtCommitTransaction ) \
     SYSCALL_ENTRY( NtCompareObjects ) \
     SYSCALL_ENTRY( NtCompleteConnectPort ) \
     SYSCALL_ENTRY( NtConnectPort ) \
@@ -68,6 +70,7 @@
     SYSCALL_ENTRY( NtCreateThread ) \
     SYSCALL_ENTRY( NtCreateThreadEx ) \
     SYSCALL_ENTRY( NtCreateTimer ) \
+    SYSCALL_ENTRY( NtCreateTransaction ) \
     SYSCALL_ENTRY( NtCreateUserProcess ) \
     SYSCALL_ENTRY( NtDebugActiveProcess ) \
     SYSCALL_ENTRY( NtDebugContinue ) \
@@ -196,6 +199,7 @@
     SYSCALL_ENTRY( NtRestoreKey ) \
     SYSCALL_ENTRY( NtResumeProcess ) \
     SYSCALL_ENTRY( NtResumeThread ) \
+    SYSCALL_ENTRY( NtRollbackTransaction ) \
     SYSCALL_ENTRY( NtSaveKey ) \
     SYSCALL_ENTRY( NtSecureConnectPort ) \
     SYSCALL_ENTRY( NtSetContextThread ) \
@@ -253,13 +257,7 @@
     SYSCALL_ENTRY( NtWriteFileGather ) \
     SYSCALL_ENTRY( NtWriteVirtualMemory ) \
     SYSCALL_ENTRY( NtYieldExecution ) \
-    SYSCALL_ENTRY( __wine_dbg_write ) \
-    SYSCALL_ENTRY( __wine_unix_call ) \
-    SYSCALL_ENTRY( __wine_unix_spawnvp ) \
     SYSCALL_ENTRY( wine_nt_to_unix_file_name ) \
-    SYSCALL_ENTRY( wine_server_call ) \
-    SYSCALL_ENTRY( wine_server_fd_to_handle ) \
-    SYSCALL_ENTRY( wine_server_handle_to_fd ) \
     SYSCALL_ENTRY( wine_unix_to_nt_file_name )
 
 #endif /* __WOW64_SYSCALL_H */

@@ -155,6 +155,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "DndProtocol",
     "DndSelection",
     "_ICC_PROFILE",
+    "_KDE_NET_WM_STATE_SKIP_SWITCHER",
     "_MOTIF_WM_HINTS",
     "_NET_STARTUP_INFO_BEGIN",
     "_NET_STARTUP_INFO",
@@ -162,6 +163,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
     "_NET_SYSTEM_TRAY_VISUAL",
+    "_NET_WM_FULLSCREEN_MONITORS",
     "_NET_WM_ICON",
     "_NET_WM_MOVERESIZE",
     "_NET_WM_NAME",
@@ -372,12 +374,12 @@ HKEY open_hkcu_key( const char *name )
 
         sid = ((TOKEN_USER *)sid_data)->User.Sid;
         len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
-                       MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
-                                           sid->IdentifierAuthority.Value[4] ),
-                                 MAKEWORD( sid->IdentifierAuthority.Value[3],
-                                           sid->IdentifierAuthority.Value[2] )));
+                       (int)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5],
+                                                sid->IdentifierAuthority.Value[4] ),
+                                      MAKEWORD( sid->IdentifierAuthority.Value[3],
+                                                sid->IdentifierAuthority.Value[2] )));
         for (i = 0; i < sid->SubAuthorityCount; i++)
-            len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+            len += sprintf( buffer + len, "-%u", (int)sid->SubAuthority[i] );
 
         ascii_to_unicode( bufferW, buffer, len );
         hkcu = reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
@@ -1009,14 +1011,19 @@ NTSTATUS CDECL X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDP
 
 static HANDLE get_display_device_init_mutex(void)
 {
-    static const WCHAR init_mutexW[] = {'d','i','s','p','l','a','y','_','d','e','v','i','c','e','_','i','n','i','t'};
-    UNICODE_STRING name = { sizeof(init_mutexW), sizeof(init_mutexW), (WCHAR *)init_mutexW };
+    WCHAR bufferW[256];
+    UNICODE_STRING name = {.Buffer = bufferW};
     OBJECT_ATTRIBUTES attr;
-    HANDLE mutex = 0;
+    char buffer[256];
+    HANDLE mutex;
+
+    snprintf( buffer, ARRAY_SIZE(buffer), "\\Sessions\\%u\\BaseNamedObjects\\display_device_init",
+              (int)NtCurrentTeb()->Peb->SessionId );
+    name.Length = name.MaximumLength = asciiz_to_unicode( bufferW, buffer );
 
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
-    NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE );
-    if (mutex) NtWaitForSingleObject( mutex, FALSE, NULL );
+    if (NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE ) < 0) return 0;
+    NtWaitForSingleObject( mutex, FALSE, NULL );
     return mutex;
 }
 
@@ -1144,7 +1151,7 @@ NTSTATUS CDECL X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *des
     VkPhysicalDevice *vk_physical_devices = NULL;
     VkPhysicalDeviceProperties2 properties2;
     NTSTATUS status = STATUS_UNSUCCESSFUL;
-    DWORD device_count, device_idx = 0;
+    UINT device_count, device_idx = 0;
     struct x11_d3dkmt_adapter *adapter;
     VkInstanceCreateInfo create_info;
     VkPhysicalDeviceIDProperties id;
@@ -1153,8 +1160,8 @@ NTSTATUS CDECL X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *des
 
     if (!get_vulkan_uuid_from_luid(&desc->AdapterLuid, &uuid))
     {
-        WARN("Failed to find Vulkan device with LUID %08x:%08x.\n", desc->AdapterLuid.HighPart,
-             desc->AdapterLuid.LowPart);
+        WARN("Failed to find Vulkan device with LUID %08x:%08x.\n",
+             (int)desc->AdapterLuid.HighPart, (int)desc->AdapterLuid.LowPart);
         return STATUS_INVALID_PARAMETER;
     }
 

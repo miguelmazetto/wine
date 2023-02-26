@@ -18,6 +18,11 @@
 
 var tests = [];
 
+sync_test("url", function() {
+    ok(document.URL === "http://winetest.example.org/index.html?dom.js", "document.URL = " + document.URL);
+    ok(!("documentURI" in document), "documentURI in document");
+});
+
 sync_test("input_selection", function() {
     var input = document.createElement("input");
     input.type = "text";
@@ -288,6 +293,8 @@ sync_test("rects", function() {
     ok(rects.length === 1, "rect.length = " + rects.length);
     ok(rects[0].top === rect.top, "rects[0].top = " + rects[0].top + " rect.top = " + rect.top);
     ok(rects[0].bottom === rect.bottom, "rects[0].bottom = " + rects[0].bottom + " rect.bottom = " + rect.bottom);
+    ok(rect.height === rect.bottom - rect.top, "rect.height = " + rect.height + " rect.bottom = " + rect.bottom + " rect.top = " + rect.top);
+    ok(rect.width === rect.right - rect.left, "rect.width = " + rect.width + " rect.right = " + rect.right + " rect.left = " + rect.left);
 
     elem = document.createElement("style");
     rects = elem.getClientRects();
@@ -716,4 +723,31 @@ sync_test("classList", function() {
     elem.className = "  testclass    foobar  ";
     ok(("" + classList) === "  testclass    foobar  ", "Expected classList value '  testclass    foobar  ', got " + classList);
     ok(classList.toString() === "  testclass    foobar  ", "Expected classList toString '  testclass    foobar  ', got " + classList.toString());
+});
+
+sync_test("importNode", function() {
+    var node, node2, orig_node, doc = document.implementation.createHTMLDocument("TestDoc");
+    doc.body.innerHTML = '<div id="test"><span/></div>';
+    orig_node = doc.getElementById("test");
+
+    node = document.importNode(orig_node, false);
+    ok(node !== orig_node, "node = orig_node");
+    ok(orig_node.hasChildNodes() === true, "orig_node does not have child nodes");
+    ok(orig_node.parentNode === doc.body, "orig_node.parentNode = " + orig_node.parentNode);
+    ok(node.hasChildNodes() === false, "node has child nodes with shallow import");
+    ok(node.parentNode === null, "node.parentNode = " + node.parentNode);
+
+    node = document.importNode(orig_node, true);
+    ok(node !== orig_node, "node = orig_node");
+    ok(orig_node.hasChildNodes() === true, "orig_node does not have child nodes");
+    ok(orig_node.parentNode === doc.body, "orig_node.parentNode = " + orig_node.parentNode);
+    ok(node.hasChildNodes() === true, "node does not have child nodes with deep import");
+    ok(node.parentNode === null, "node.parentNode = " + node.parentNode);
+
+    node2 = document.importNode(node, false);
+    ok(node !== node2, "node = node2");
+    ok(node.hasChildNodes() === true, "node does not have child nodes");
+    ok(node.parentNode === null, "node.parentNode = " + node.parentNode);
+    ok(node2.hasChildNodes() === false, "node2 has child nodes");
+    ok(node2.parentNode === null, "node2.parentNode = " + node2.parentNode);
 });

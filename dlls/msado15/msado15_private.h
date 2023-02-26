@@ -26,20 +26,6 @@ HRESULT Connection_create( void ** ) DECLSPEC_HIDDEN;
 HRESULT Recordset_create( void ** ) DECLSPEC_HIDDEN;
 HRESULT Stream_create( void ** ) DECLSPEC_HIDDEN;
 
-static inline void *heap_realloc_zero( void *mem, SIZE_T len )
-{
-    if (!mem) return HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, len );
-    return HeapReAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, mem, len );
-}
-
-static inline WCHAR *strdupW( const WCHAR *src )
-{
-    WCHAR *dst;
-    if (!src) return NULL;
-    if ((dst = heap_alloc( (lstrlenW( src ) + 1) * sizeof(*dst) ))) lstrcpyW( dst, src );
-    return dst;
-}
-
 typedef enum tid_t {
     ADORecordsetConstruction_tid,
     Command_tid,
@@ -47,6 +33,7 @@ typedef enum tid_t {
     Field_tid,
     Fields_tid,
     Properties_tid,
+    Property_tid,
     Recordset_tid,
     Stream_tid,
     LAST_tid

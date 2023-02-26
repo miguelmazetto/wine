@@ -1348,9 +1348,13 @@ static void test_swapchain(void)
     ok(SUCCEEDED(hr), "Got hr %#lx.\n", hr);
     ok(d3dpp.BackBufferCount == 1, "The back buffer count in the presentparams struct is %d\n", d3dpp.BackBufferCount);
 
+    d3dpp.hDeviceWindow = NULL;
     d3dpp.BackBufferCount  = 1;
     hr = IDirect3DDevice9_CreateAdditionalSwapChain(device, &d3dpp, &swapchain2);
-    ok(SUCCEEDED(hr), "Got hr %#lx.\n", hr);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DSwapChain9_GetPresentParameters(swapchain2, &d3dpp);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+    ok(d3dpp.hDeviceWindow == window, "Got window %p, expected %p.\n", d3dpp.hDeviceWindow, window);
 
     d3dpp.BackBufferCount  = 2;
     hr = IDirect3DDevice9_CreateAdditionalSwapChain(device, &d3dpp, &swapchain3);
@@ -4290,7 +4294,6 @@ static void test_wndproc(void)
 
         SetForegroundWindow(GetDesktopWindow());
         ShowWindow(device_window, SW_MINIMIZE);
-        ShowWindow(device_window, SW_RESTORE);
         ShowWindow(focus_window, SW_MINIMIZE);
         ShowWindow(focus_window, SW_RESTORE);
         SetForegroundWindow(focus_window);
@@ -4335,13 +4338,13 @@ static void test_wndproc(void)
         }
         filter_messages = NULL;
         SetForegroundWindow(focus_window); /* For KDE. */
-        flush_events();
 
         expect_messages = focus_loss_messages_filtered;
         windowposchanged_received = 0;
         SetForegroundWindow(GetDesktopWindow());
         ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it, i=%u.\n",
                 expect_messages->message, expect_messages->window, i);
+        flaky_if(i == 0)
         ok(!windowposchanged_received, "Received WM_WINDOWPOSCHANGED but did not expect it, i=%u.\n", i);
         expect_messages = NULL;
 
@@ -4410,6 +4413,10 @@ static void test_wndproc(void)
 
         ref = IDirect3DDevice9_Release(device);
         ok(!ref, "Unexpected refcount %lu, i=%u.\n", ref, i);
+
+        ShowWindow(device_window, SW_RESTORE);
+        SetForegroundWindow(focus_window);
+        flush_events();
 
         filter_messages = focus_window;
         device_desc.device_window = device_window;
@@ -5287,6 +5294,7 @@ static void test_cursor_pos(void)
     ok(ret, "Failed to set cursor position.\n");
     flush_events();
 
+    flaky
     ok((!expect_pos->x && !expect_pos->y) || broken(expect_pos - points == 7),
         "Didn't receive MOUSEMOVE %u (%ld, %ld).\n",
         (unsigned)(expect_pos - points), expect_pos->x, expect_pos->y);
@@ -11042,10 +11050,12 @@ static void test_pixel_format(void)
     PIXELFORMATDESCRIPTOR pfd;
     IDirect3D9 *d3d9 = NULL;
     IDirect3DDevice9 *device = NULL;
-    HWND hwnd, hwnd2;
-    HDC hdc, hdc2;
+    HWND hwnd, hwnd2, hwnd3;
+    HDC hdc, hdc2, hdc3;
+    ULONG refcount;
     HMODULE gl;
     HRESULT hr;
+    BOOL ret;
 
     static const float point[] = {0.0f, 0.0f, 0.0f};
 
@@ -11144,14 +11154,68 @@ static void test_pixel_format(void)
     test_format = GetPixelFormat(hdc2);
     ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
 
-cleanup:
-    if (device)
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+    IDirect3D9_Release(d3d9);
+
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+    test_format = GetPixelFormat(hdc2);
+    ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
+
+    /* Test that creating a device doesn't set a pixel format on a window which
+     * never had one. */
+
+    hwnd3 = create_window();
+    hdc3 = GetDC(hwnd3);
+
+    test_format = GetPixelFormat(hdc3);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d9, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d9, hwnd3, NULL)))
     {
-        ULONG refcount = IDirect3DDevice9_Release(device);
-        ok(!refcount, "Device has %lu references left.\n", refcount);
+        skip("Failed to create device\n");
+        goto cleanup;
     }
-    if (d3d9)
-        IDirect3D9_Release(d3d9);
+
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_POINTLIST, 1, point, 3 * sizeof(float));
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IDirect3DDevice9_EndScene(device);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+    IDirect3D9_Release(d3d9);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    ret = SetPixelFormat(hdc3, format, &pfd);
+    ok(ret, "Failed to set pixel format %d.\n", format);
+
+    test_format = GetPixelFormat(hdc3);
+    ok(test_format == format, "Expected pixel format %d, got %d.\n", format, test_format);
+
+    ReleaseDC(hwnd3, hdc3);
+    DestroyWindow(hwnd3);
+
+cleanup:
     FreeLibrary(gl);
     ReleaseDC(hwnd2, hdc2);
     ReleaseDC(hwnd, hdc);
@@ -12206,7 +12270,7 @@ static void test_swapchain_parameters(void)
 
     present_parameters_windowed.BackBufferWidth = registry_mode.dmPelsWidth;
     present_parameters_windowed.BackBufferHeight = registry_mode.dmPelsHeight;
-    present_parameters_windowed.hDeviceWindow = window;
+    present_parameters_windowed.hDeviceWindow = NULL;
     present_parameters_windowed.BackBufferFormat = D3DFMT_X8R8G8B8;
     present_parameters_windowed.SwapEffect = D3DSWAPEFFECT_COPY;
     present_parameters_windowed.Windowed = TRUE;
@@ -12217,7 +12281,7 @@ static void test_swapchain_parameters(void)
         memset(&present_parameters, 0, sizeof(present_parameters));
         present_parameters.BackBufferWidth = registry_mode.dmPelsWidth;
         present_parameters.BackBufferHeight = registry_mode.dmPelsHeight;
-        present_parameters.hDeviceWindow = window;
+        present_parameters.hDeviceWindow = NULL;
         present_parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
 
         present_parameters.SwapEffect = tests[i].swap_effect;
@@ -12235,7 +12299,9 @@ static void test_swapchain_parameters(void)
             ok(SUCCEEDED(hr), "Failed to get swapchain, hr %#lx, test %u.\n", hr, i);
 
             hr = IDirect3DSwapChain9_GetPresentParameters(swapchain, &present_parameters2);
-            ok(SUCCEEDED(hr), "Failed to get present parameters, hr %#lx, test %u.\n", hr, i);
+            ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+            ok(present_parameters2.hDeviceWindow == window, "Got window %p, expected %p.\n",
+                    present_parameters2.hDeviceWindow, window);
             ok(present_parameters2.SwapEffect == tests[i].swap_effect, "Swap effect changed from %u to %u, test %u.\n",
                     tests[i].swap_effect, present_parameters2.SwapEffect, i);
             ok(present_parameters2.BackBufferCount == bb_count, "Backbuffer count changed from %u to %u, test %u.\n",
@@ -12254,7 +12320,7 @@ static void test_swapchain_parameters(void)
         memset(&present_parameters, 0, sizeof(present_parameters));
         present_parameters.BackBufferWidth = registry_mode.dmPelsWidth;
         present_parameters.BackBufferHeight = registry_mode.dmPelsHeight;
-        present_parameters.hDeviceWindow = window;
+        present_parameters.hDeviceWindow = NULL;
         present_parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
 
         present_parameters.SwapEffect = tests[i].swap_effect;
@@ -12266,9 +12332,18 @@ static void test_swapchain_parameters(void)
 
         if (FAILED(hr))
         {
+            present_parameters_windowed.hDeviceWindow = NULL;
             hr = IDirect3DDevice9_Reset(device, &present_parameters_windowed);
             ok(SUCCEEDED(hr), "Failed to reset device, hr %#lx, test %u.\n", hr, i);
         }
+
+        hr = IDirect3DDevice9_GetSwapChain(device, 0, &swapchain);
+        ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+        hr = IDirect3DSwapChain9_GetPresentParameters(swapchain, &present_parameters2);
+        ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+        ok(present_parameters2.hDeviceWindow == window, "Got window %p, expected %p.\n",
+                present_parameters2.hDeviceWindow, window);
+        IDirect3DSwapChain9_Release(swapchain);
         IDirect3DDevice9_Release(device);
     }
 

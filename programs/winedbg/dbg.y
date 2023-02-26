@@ -59,7 +59,7 @@ static void parser(const char*);
 %token <integer> tNUM tFORMAT
 %token <type> tTYPEDEF
 %token tSYMBOLFILE tRUN tATTACH tDETACH tKILL tMAINTENANCE tTYPE tMINIDUMP
-%token tNOPROCESS
+%token tNOPROCESS tWOW
 
 /* can be prefixed by module name */
 %token <string> tVOID tCHAR tWCHAR tSHORT tINT tLONG tFLOAT tDOUBLE tUNSIGNED tSIGNED
@@ -139,7 +139,7 @@ command:
     | tSOURCE pathname          { parser($2); }
     | tSYMBOLFILE pathname     	{ symbol_read_symtable($2, 0); }
     | tSYMBOLFILE pathname expr_rvalue { symbol_read_symtable($2, $3); }
-    | tWHATIS expr_lvalue       { dbg_printf("type = "); types_print_type(&$2.type, FALSE); dbg_printf("\n"); }
+    | tWHATIS expr_lvalue       { dbg_printf("type = "); types_print_type(&$2.type, FALSE, NULL); dbg_printf("\n"); }
     | tATTACH tNUM     		{ dbg_attach_debuggee($2); dbg_active_wait_for_first_exception(); }
     | tDETACH                   { dbg_curr_process->process_io->close_process(dbg_curr_process, FALSE); }
     | tTHREAD tNUM              { dbg_set_curr_thread($2); }
@@ -225,7 +225,7 @@ x_command:
 print_command:
       tPRINT expr_lvalue         { print_value(&$2, 0, 0); }
     | tPRINT tFORMAT expr_lvalue { if (($2 >> 8) == 1) print_value(&$3, $2 & 0xff, 0); else dbg_printf("Count is meaningless in print command\n"); }
-    | tPRINT type_expr           { types_print_type(&$2, TRUE); dbg_printf("\n"); }
+    | tPRINT type_expr           { types_print_type(&$2, TRUE, NULL); dbg_printf("\n"); }
     ;
 
 break_command:
@@ -269,8 +269,9 @@ display_command:
 
 info_command:
       tINFO tBREAK              { break_info(); }
-    | tINFO tSHARE     		{ info_win32_module(0); }
-    | tINFO tSHARE expr_rvalue  { info_win32_module($3); }
+    | tINFO tSHARE              { info_win32_module(0, FALSE); }
+    | tINFO tWOW tSHARE         { info_win32_module(0, TRUE); }
+    | tINFO tSHARE expr_rvalue  { info_win32_module($3, FALSE); }
     | tINFO tREGS               { dbg_curr_process->be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 0); }
     | tINFO tALLREGS            { dbg_curr_process->be_cpu->print_context(dbg_curr_thread->handle, &dbg_context, 1); }
     | tINFO tSEGMENTS expr_rvalue { info_win32_segments($3 >> 3, 1); }

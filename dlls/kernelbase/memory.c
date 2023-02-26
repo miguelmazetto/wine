@@ -835,7 +835,7 @@ HGLOBAL WINAPI DECLSPEC_HOTPATCH GlobalFree( HLOCAL handle )
  */
 HLOCAL WINAPI DECLSPEC_HOTPATCH LocalAlloc( UINT flags, SIZE_T size )
 {
-    DWORD heap_flags = HEAP_ADD_USER_INFO;
+    DWORD heap_flags = 0x200 | HEAP_ADD_USER_INFO;
     HANDLE heap = GetProcessHeap();
     struct mem_entry *mem;
     HLOCAL handle;
@@ -903,7 +903,8 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalFree( HLOCAL handle )
     TRACE_(globalmem)( "handle %p\n", handle );
 
     RtlLockHeap( heap );
-    if ((ptr = unsafe_ptr_from_HLOCAL( handle )))
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )) &&
+        HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ))
     {
         if (HeapFree( heap, HEAP_NO_SERIALIZE, ptr )) ret = 0;
     }
@@ -974,7 +975,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH LocalLock( HLOCAL handle )
  */
 HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT flags )
 {
-    DWORD heap_flags = HEAP_ADD_USER_INFO | HEAP_NO_SERIALIZE;
+    DWORD heap_flags = 0x200 | HEAP_ADD_USER_INFO | HEAP_NO_SERIALIZE;
     HANDLE heap = GetProcessHeap();
     struct mem_entry *mem;
     HLOCAL ret = 0;
@@ -985,9 +986,11 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT f
     if (flags & LMEM_ZEROINIT) heap_flags |= HEAP_ZERO_MEMORY;
 
     RtlLockHeap( heap );
-    if ((ptr = unsafe_ptr_from_HLOCAL( handle )))
+    if ((ptr = unsafe_ptr_from_HLOCAL( handle )) &&
+        HeapValidate( heap, HEAP_NO_SERIALIZE, ptr ))
     {
         if (flags & LMEM_MODIFY) ret = handle;
+        else if (flags & LMEM_DISCARDABLE) SetLastError( ERROR_INVALID_PARAMETER );
         else
         {
             if (!(flags & LMEM_MOVEABLE)) heap_flags |= HEAP_REALLOC_IN_PLACE_ONLY;
@@ -998,10 +1001,17 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT f
     }
     else if ((mem = unsafe_mem_from_HLOCAL( handle )))
     {
-        if (!(flags & LMEM_MODIFY))
+        if (flags & LMEM_MODIFY)
+        {
+            if (flags & LMEM_DISCARDABLE) mem->flags |= MEM_FLAG_DISCARDABLE;
+            ret = handle;
+        }
+        else if (flags & LMEM_DISCARDABLE) SetLastError( ERROR_INVALID_PARAMETER );
+        else
         {
             if (size)
             {
+                if (mem->lock && !(flags & LMEM_MOVEABLE)) heap_flags |= HEAP_REALLOC_IN_PLACE_ONLY;
                 if (!mem->ptr) ptr = HeapAlloc( heap, heap_flags, size );
                 else ptr = HeapReAlloc( heap, heap_flags, mem->ptr, size );
 
@@ -1014,21 +1024,15 @@ HLOCAL WINAPI DECLSPEC_HOTPATCH LocalReAlloc( HLOCAL handle, SIZE_T size, UINT f
                     ret = handle;
                 }
             }
-            else
+            else if ((flags & LMEM_MOVEABLE) && !mem->lock)
             {
                 HeapFree( heap, heap_flags, mem->ptr );
                 mem->flags |= MEM_FLAG_DISCARDED;
-                mem->lock = 0;
                 mem->ptr = NULL;
                 ret = handle;
             }
+            else SetLastError( ERROR_INVALID_PARAMETER );
         }
-        else if (flags & LMEM_DISCARDABLE)
-        {
-            mem->flags |= MEM_FLAG_DISCARDABLE;
-            ret = handle;
-        }
-        else SetLastError( ERROR_INVALID_PARAMETER );
     }
     else SetLastError( ERROR_INVALID_HANDLE );
     RtlUnlockHeap( heap );
@@ -1408,6 +1412,23 @@ LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocExNuma( HANDLE process, void *addr, 
 {
     if (node) FIXME( "Ignoring preferred node %lu\n", node );
     return VirtualAllocEx( process, addr, size, type, protect );
+}
+
+
+/***********************************************************************
+ *             QueryVirtualMemoryInformation   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH QueryVirtualMemoryInformation( HANDLE process, const void *addr,
+        WIN32_MEMORY_INFORMATION_CLASS info_class, void *info, SIZE_T size, SIZE_T *ret_size)
+{
+    switch (info_class)
+    {
+        case MemoryRegionInfo:
+            return set_ntstatus( NtQueryVirtualMemory( process, addr, MemoryRegionInformation, info, size, ret_size ));
+        default:
+            FIXME("Unsupported info class %u.\n", info_class);
+            return FALSE;
+    }
 }
 
 

@@ -3529,14 +3529,17 @@ static void test_coop_level_mode_set(void)
     hr = IDirectDrawSurface4_IsLost(primary);
     ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#lx.\n", hr);
 
+    flaky /* win8 */
     ok(!expect_messages->message, "Expected message %#x, but didn't receive it.\n", expect_messages->message);
     expect_messages = NULL;
+    flaky /* win8 */
     ok(screen_size.cx == registry_mode.dmPelsWidth
             && screen_size.cy == registry_mode.dmPelsHeight,
             "Expected screen size %lux%lu, got %lux%lu.\n",
             registry_mode.dmPelsWidth, registry_mode.dmPelsHeight, screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3567,6 +3570,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3574,6 +3578,7 @@ static void test_coop_level_mode_set(void)
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#lx.\n", hr);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3600,6 +3605,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3623,6 +3629,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3645,6 +3652,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3671,6 +3679,7 @@ static void test_coop_level_mode_set(void)
             param.ddraw_height, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3691,6 +3700,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3727,6 +3737,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3737,6 +3748,7 @@ static void test_coop_level_mode_set(void)
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#lx.\n", hr);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3763,6 +3775,7 @@ static void test_coop_level_mode_set(void)
             registry_mode.dmPelsHeight, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3786,6 +3799,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3808,6 +3822,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3834,6 +3849,7 @@ static void test_coop_level_mode_set(void)
             param.ddraw_height, ddsd.dwHeight);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3854,6 +3870,7 @@ static void test_coop_level_mode_set(void)
     ok(!screen_size.cx && !screen_size.cy, "Got unexpected screen size %lux%lu.\n", screen_size.cx, screen_size.cy);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -3891,6 +3908,7 @@ static void test_coop_level_mode_set(void)
     IDirectDrawSurface4_Release(primary);
 
     GetWindowRect(window, &r);
+    flaky /* win8 */
     ok(EqualRect(&r, &registry_rect), "Expected %s, got %s.\n", wine_dbgstr_rect(&registry_rect),
             wine_dbgstr_rect(&r));
 
@@ -8831,38 +8849,29 @@ static void test_private_data(void)
 
 static void test_pixel_format(void)
 {
-    HWND window, window2 = NULL;
-    HDC hdc, hdc2 = NULL;
+    HWND window, window2, window3;
     HMODULE gl = NULL;
     int format, test_format;
     PIXELFORMATDESCRIPTOR pfd;
     IDirectDraw4 *ddraw = NULL;
     IDirectDrawClipper *clipper = NULL;
     DDSURFACEDESC2 ddsd;
+    HDC hdc, hdc2, hdc3;
     IDirectDrawSurface4 *primary = NULL, *offscreen;
+    ULONG refcount;
     DDBLTFX fx;
     HRESULT hr;
+    BOOL ret;
 
-    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            100, 100, 160, 160, NULL, NULL, NULL, NULL);
-    if (!window)
-    {
-        skip("Failed to create window\n");
-        return;
-    }
-
-    window2 = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    window = create_window();
+    ok(!!window, "Failed to create window.\n");
+    window2 = create_window();
+    ok(!!window2, "Failed to create window.\n");
 
     hdc = GetDC(window);
-    if (!hdc)
-    {
-        skip("Failed to get DC\n");
-        goto cleanup;
-    }
-
-    if (window2)
-        hdc2 = GetDC(window2);
+    ok(!!hdc, "Failed to get DC.\n");
+    hdc2 = GetDC(window2);
+    ok(!!hdc2, "Failed to get DC.\n");
 
     gl = LoadLibraryA("opengl32.dll");
     ok(!!gl, "failed to load opengl32.dll; SetPixelFormat()/GetPixelFormat() may not work right\n");
@@ -8889,14 +8898,10 @@ static void test_pixel_format(void)
         goto cleanup;
     }
 
-    if (!hdc2 || !SetPixelFormat(hdc2, format, &pfd) || GetPixelFormat(hdc2) != format)
+    if (!SetPixelFormat(hdc2, format, &pfd) || GetPixelFormat(hdc2) != format)
     {
         skip("failed to set pixel format on second window\n");
-        if (hdc2)
-        {
-            ReleaseDC(window2, hdc2);
-            hdc2 = NULL;
-        }
+        goto cleanup;
     }
 
     ddraw = create_ddraw();
@@ -8906,28 +8911,20 @@ static void test_pixel_format(void)
     ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
-    if (FAILED(hr))
-    {
-        skip("Failed to set cooperative level, hr %#lx.\n", hr);
-        goto cleanup;
-    }
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
     test_format = GetPixelFormat(hdc);
     ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
 
-    if (hdc2)
-    {
-        hr = IDirectDraw4_CreateClipper(ddraw, 0, &clipper, NULL);
-        ok(SUCCEEDED(hr), "Failed to create clipper, hr %#lx.\n", hr);
-        hr = IDirectDrawClipper_SetHWnd(clipper, 0, window2);
-        ok(SUCCEEDED(hr), "Failed to set clipper window, hr %#lx.\n", hr);
+    hr = IDirectDraw4_CreateClipper(ddraw, 0, &clipper, NULL);
+    ok(SUCCEEDED(hr), "Failed to create clipper, hr %#lx.\n", hr);
+    hr = IDirectDrawClipper_SetHWnd(clipper, 0, window2);
+    ok(SUCCEEDED(hr), "Failed to set clipper window, hr %#lx.\n", hr);
 
-        test_format = GetPixelFormat(hdc);
-        ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
-
-        test_format = GetPixelFormat(hdc2);
-        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
-    }
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+    test_format = GetPixelFormat(hdc2);
+    ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
 
     memset(&ddsd, 0, sizeof(ddsd));
     ddsd.dwSize = sizeof(ddsd);
@@ -8939,24 +8936,16 @@ static void test_pixel_format(void)
 
     test_format = GetPixelFormat(hdc);
     ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+    test_format = GetPixelFormat(hdc2);
+    ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
 
-    if (hdc2)
-    {
-        test_format = GetPixelFormat(hdc2);
-        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
-    }
+    hr = IDirectDrawSurface4_SetClipper(primary, clipper);
+    ok(SUCCEEDED(hr), "Failed to set clipper, hr %#lx.\n", hr);
 
-    if (clipper)
-    {
-        hr = IDirectDrawSurface4_SetClipper(primary, clipper);
-        ok(SUCCEEDED(hr), "Failed to set clipper, hr %#lx.\n", hr);
-
-        test_format = GetPixelFormat(hdc);
-        ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
-
-        test_format = GetPixelFormat(hdc2);
-        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
-    }
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+    test_format = GetPixelFormat(hdc2);
+    ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
 
     memset(&ddsd, 0, sizeof(ddsd));
     ddsd.dwSize = sizeof(ddsd);
@@ -8979,24 +8968,82 @@ static void test_pixel_format(void)
 
     test_format = GetPixelFormat(hdc);
     ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
-
-    if (hdc2)
-    {
-        test_format = GetPixelFormat(hdc2);
-        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
-    }
+    test_format = GetPixelFormat(hdc2);
+    ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
 
     IDirectDrawSurface4_Release(offscreen);
+    IDirectDrawSurface4_Release(primary);
+    refcount = IDirectDrawClipper_Release(clipper);
+    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+    refcount = IDirectDraw4_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+
+    /* Test that creating a device doesn't set a pixel format on a window which
+     * never had one. */
+
+    window3 = create_window();
+    hdc3 = GetDC(window3);
+
+    test_format = GetPixelFormat(hdc3);
+    ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window3, DDSCL_NORMAL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &primary, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    ddsd.dwWidth = ddsd.dwHeight = 64;
+    hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &offscreen, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#lx.\n",hr);
+
+    memset(&fx, 0, sizeof(fx));
+    fx.dwSize = sizeof(fx);
+    hr = IDirectDrawSurface4_Blt(offscreen, NULL, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+    ok(SUCCEEDED(hr), "Failed to clear source surface, hr %#lx.\n", hr);
+
+    hr = IDirectDrawSurface4_Blt(primary, NULL, offscreen, NULL, DDBLT_WAIT, NULL);
+    ok(SUCCEEDED(hr), "Failed to blit to primary surface, hr %#lx.\n", hr);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    IDirectDrawSurface4_Release(offscreen);
+    IDirectDrawSurface4_Release(primary);
+    refcount = IDirectDraw4_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %lu.\n", refcount);
+
+    test_format = GetPixelFormat(hdc3);
+    todo_wine ok(!test_format, "Expected no format, got %d.\n", test_format);
+
+    ret = SetPixelFormat(hdc3, format, &pfd);
+    ok(ret, "Failed to set pixel format %d.\n", format);
+
+    test_format = GetPixelFormat(hdc3);
+    ok(test_format == format, "Expected pixel format %d, got %d.\n", format, test_format);
+
+    ReleaseDC(window3, hdc3);
+    DestroyWindow(window3);
 
 cleanup:
-    if (primary) IDirectDrawSurface4_Release(primary);
-    if (clipper) IDirectDrawClipper_Release(clipper);
-    if (ddraw) IDirectDraw4_Release(ddraw);
-    if (gl) FreeLibrary(gl);
-    if (hdc) ReleaseDC(window, hdc);
-    if (hdc2) ReleaseDC(window2, hdc2);
+    FreeLibrary(gl);
+    ReleaseDC(window2, hdc2);
+    ReleaseDC(window, hdc);
+    DestroyWindow(window2);
     DestroyWindow(window);
-    if (window2) DestroyWindow(window2);
 }
 
 static void test_create_surface_pitch(void)
@@ -18403,8 +18450,7 @@ static BOOL CALLBACK test_window_position_cb(HMONITOR monitor, HDC hdc, RECT *mo
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
     window = CreateWindowA("static", "ddraw_test", WS_POPUP | WS_VISIBLE, monitor_rect->left,
-            monitor_rect->top, monitor_rect->right - monitor_rect->left,
-            monitor_rect->bottom - monitor_rect->top, NULL, NULL, NULL, NULL);
+            monitor_rect->top, 100, 100, NULL, NULL, NULL, NULL);
     ok(!!window, "Failed to create a window.\n");
     flush_events();
 
@@ -19213,6 +19259,10 @@ static HRESULT WINAPI test_enum_devices_caps_callback(GUID *guid, char *device_d
            "RGB Device hal device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
         ok((hel->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
            "RGB Device hel device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+        ok((hal->dwDevCaps & D3DDEVCAPS_HWRASTERIZATION) == 0,
+           "RGB Device hal device caps has D3DDEVCAPS_HWRASTERIZATION set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_HWRASTERIZATION) == 0,
+           "RGB Device hel device caps has D3DDEVCAPS_HWRASTERIZATION set\n");
     }
     else if(IsEqualGUID(&IID_IDirect3DHALDevice, guid))
     {

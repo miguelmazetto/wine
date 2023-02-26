@@ -25,11 +25,30 @@ struct uia_prop_info {
     int prop_id;
     int prop_type;
     int type;
+    int pattern_id;
+};
+
+struct uia_event_info {
+    const GUID *guid;
+    int event_id;
+    int event_arg_type;
+};
+
+struct uia_pattern_info {
+    const GUID *guid;
+    int pattern_id;
+    const GUID *pattern_iid;
+};
+
+struct uia_control_type_info {
+    const GUID *guid;
+    int control_type_id;
 };
 
 [
    version(1.0),
    uuid(8a9ca8eb-856b-43d9-abd7-4a590054064f),
+   id(1),
 ]
 library UIA_wine_private
 {
@@ -44,6 +63,9 @@ library UIA_wine_private
     interface IWineUiaProvider : IUnknown
     {
         HRESULT get_prop_val([in]const struct uia_prop_info *prop_info, [out, retval]VARIANT *ret_val);
+        HRESULT get_prov_opts([out, retval]int *out_opts);
+        HRESULT has_parent([out, retval]BOOL *out_val);
+        HRESULT navigate([in]int nav_dir, [out, retval]VARIANT *ret_val);
     }
 
     [
@@ -54,7 +76,9 @@ library UIA_wine_private
     ]
     interface IWineUiaNode : IUnknown
     {
-        HRESULT get_provider([out, retval]IWineUiaProvider **out_prov);
+        HRESULT get_provider([in]int idx, [out, retval]IWineUiaProvider **out_prov);
         HRESULT get_prop_val([in]const GUID *prop_guid, [out, retval]VARIANT *ret_val);
+        HRESULT disconnect();
+        HRESULT get_hwnd([out, retval]ULONG *out_hwnd);
     }
 }

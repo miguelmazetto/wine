@@ -21,6 +21,7 @@
 
 #include "wine/debug.h"
 #include "wine/heap.h"
+#include "wine/rbtree.h"
 #include "initguid.h"
 #include "wine/iaccessible2.h"
 
@@ -32,12 +33,6 @@ static void variant_init_i4(VARIANT *v, int val)
 {
     V_VT(v) = VT_I4;
     V_I4(v) = val;
-}
-
-static void variant_init_bool(VARIANT *v, BOOL val)
-{
-    V_VT(v) = VT_BOOL;
-    V_BOOL(v) = val ? VARIANT_TRUE : VARIANT_FALSE;
 }
 
 static BOOL msaa_check_acc_state(IAccessible *acc, VARIANT cid, ULONG flag)
@@ -669,6 +664,19 @@ HRESULT WINAPI msaa_provider_GetPropertyValue(IRawElementProviderSimple *iface,
                     STATE_SYSTEM_PROTECTED));
         break;
 
+    case UIA_NamePropertyId:
+    {
+        BSTR name;
+
+        hr = IAccessible_get_accName(msaa_prov->acc, msaa_prov->cid, &name);
+        if (SUCCEEDED(hr) && name)
+        {
+            V_VT(ret_val) = VT_BSTR;
+            V_BSTR(ret_val) = name;
+        }
+        break;
+    }
+
     default:
         FIXME("Unimplemented propertyId %d\n", prop_id);
         break;
@@ -873,8 +881,34 @@ static HRESULT WINAPI msaa_fragment_GetRuntimeId(IRawElementProviderFragment *if
 static HRESULT WINAPI msaa_fragment_get_BoundingRectangle(IRawElementProviderFragment *iface,
         struct UiaRect *ret_val)
 {
-    FIXME("%p, %p: stub!\n", iface, ret_val);
-    return E_NOTIMPL;
+    struct msaa_provider *msaa_prov = impl_from_msaa_fragment(iface);
+    LONG left, top, width, height;
+    HRESULT hr;
+
+    TRACE("%p, %p\n", iface, ret_val);
+
+    memset(ret_val, 0, sizeof(*ret_val));
+
+    /*
+     * If this IAccessible is at the root of its HWND, the BaseHwnd provider
+     * will supply the bounding rectangle.
+     */
+    if (msaa_check_root_acc(msaa_prov))
+        return S_OK;
+
+    if (msaa_check_acc_state(msaa_prov->acc, msaa_prov->cid, STATE_SYSTEM_OFFSCREEN))
+        return S_OK;
+
+    hr = IAccessible_accLocation(msaa_prov->acc, &left, &top, &width, &height, msaa_prov->cid);
+    if (FAILED(hr))
+        return hr;
+
+    ret_val->left = left;
+    ret_val->top = top;
+    ret_val->width = width;
+    ret_val->height = height;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI msaa_fragment_GetEmbeddedFragmentRoots(IRawElementProviderFragment *iface,
@@ -1130,6 +1164,8 @@ HRESULT WINAPI UiaProviderFromIAccessible(IAccessible *acc, long child_id, DWORD
  */
 struct uia_provider_thread
 {
+    struct rb_tree node_map;
+    struct list nodes_list;
     HANDLE hthread;
     HWND hwnd;
     LONG ref;
@@ -1145,6 +1181,140 @@ static CRITICAL_SECTION_DEBUG provider_thread_cs_debug =
 };
 static CRITICAL_SECTION provider_thread_cs = { &provider_thread_cs_debug, -1, 0, 0, 0, 0 };
 
+struct uia_provider_thread_map_entry
+{
+    struct rb_entry entry;
+
+    SAFEARRAY *runtime_id;
+    struct list nodes_list;
+};
+
+static int uia_runtime_id_compare(const void *key, const struct rb_entry *entry)
+{
+    struct uia_provider_thread_map_entry *prov_entry = RB_ENTRY_VALUE(entry, struct uia_provider_thread_map_entry, entry);
+    return uia_compare_safearrays(prov_entry->runtime_id, (SAFEARRAY *)key, UIAutomationType_IntArray);
+}
+
+void uia_provider_thread_remove_node(HUIANODE node)
+{
+    struct uia_node *node_data = impl_from_IWineUiaNode((IWineUiaNode *)node);
+
+    TRACE("Removing node %p\n", node);
+
+    EnterCriticalSection(&provider_thread_cs);
+
+    list_remove(&node_data->prov_thread_list_entry);
+    list_init(&node_data->prov_thread_list_entry);
+    if (!list_empty(&node_data->node_map_list_entry))
+    {
+        list_remove(&node_data->node_map_list_entry);
+        list_init(&node_data->node_map_list_entry);
+        if (list_empty(&node_data->map->nodes_list))
+        {
+            rb_remove(&provider_thread.node_map, &node_data->map->entry);
+            SafeArrayDestroy(node_data->map->runtime_id);
+            heap_free(node_data->map);
+        }
+        node_data->map = NULL;
+    }
+
+    LeaveCriticalSection(&provider_thread_cs);
+}
+
+static void uia_provider_thread_disconnect_node(SAFEARRAY *sa)
+{
+    struct rb_entry *rb_entry;
+
+    EnterCriticalSection(&provider_thread_cs);
+
+    /* Provider thread hasn't been started, no nodes to disconnect. */
+    if (!provider_thread.ref)
+        goto exit;
+
+    rb_entry = rb_get(&provider_thread.node_map, sa);
+    if (rb_entry)
+    {
+        struct uia_provider_thread_map_entry *prov_map;
+        struct list *cursor, *cursor2;
+        struct uia_node *node_data;
+
+        prov_map = RB_ENTRY_VALUE(rb_entry, struct uia_provider_thread_map_entry, entry);
+        LIST_FOR_EACH_SAFE(cursor, cursor2, &prov_map->nodes_list)
+        {
+            node_data = LIST_ENTRY(cursor, struct uia_node, node_map_list_entry);
+
+            list_remove(cursor);
+            list_remove(&node_data->prov_thread_list_entry);
+            list_init(&node_data->prov_thread_list_entry);
+            list_init(&node_data->node_map_list_entry);
+            node_data->map = NULL;
+
+            IWineUiaNode_disconnect(&node_data->IWineUiaNode_iface);
+        }
+
+        rb_remove(&provider_thread.node_map, &prov_map->entry);
+        SafeArrayDestroy(prov_map->runtime_id);
+        heap_free(prov_map);
+    }
+
+exit:
+    LeaveCriticalSection(&provider_thread_cs);
+}
+
+static HRESULT uia_provider_thread_add_node(HUIANODE node)
+{
+    struct uia_node *node_data = impl_from_IWineUiaNode((IWineUiaNode *)node);
+    int prov_type = get_node_provider_type_at_idx(node_data, 0);
+    struct uia_provider *prov_data;
+    SAFEARRAY *sa;
+    HRESULT hr;
+
+    prov_data = impl_from_IWineUiaProvider(node_data->prov[prov_type]);
+    node_data->nested_node = prov_data->return_nested_node = TRUE;
+    hr = UiaGetRuntimeId(node, &sa);
+    if (FAILED(hr))
+        return hr;
+
+    TRACE("Adding node %p\n", node);
+
+    EnterCriticalSection(&provider_thread_cs);
+    list_add_tail(&provider_thread.nodes_list, &node_data->prov_thread_list_entry);
+
+    /* If we have a runtime ID, create an entry in the rb tree. */
+    if (sa)
+    {
+        struct uia_provider_thread_map_entry *prov_map;
+        struct rb_entry *rb_entry;
+
+        if ((rb_entry = rb_get(&provider_thread.node_map, sa)))
+        {
+            prov_map = RB_ENTRY_VALUE(rb_entry, struct uia_provider_thread_map_entry, entry);
+            SafeArrayDestroy(sa);
+        }
+        else
+        {
+            prov_map = heap_alloc_zero(sizeof(*prov_map));
+            if (!prov_map)
+            {
+                SafeArrayDestroy(sa);
+                LeaveCriticalSection(&provider_thread_cs);
+                return E_OUTOFMEMORY;
+            }
+
+            prov_map->runtime_id = sa;
+            list_init(&prov_map->nodes_list);
+            rb_put(&provider_thread.node_map, sa, &prov_map->entry);
+        }
+
+        list_add_tail(&prov_map->nodes_list, &node_data->node_map_list_entry);
+        node_data->map = prov_map;
+    }
+
+    LeaveCriticalSection(&provider_thread_cs);
+
+    return S_OK;
+}
+
 #define WM_GET_OBJECT_UIA_NODE (WM_USER + 1)
 #define WM_UIA_PROVIDER_THREAD_STOP (WM_USER + 2)
 static LRESULT CALLBACK uia_provider_thread_msg_proc(HWND hwnd, UINT msg, WPARAM wparam,
@@ -1155,11 +1325,14 @@ static LRESULT CALLBACK uia_provider_thread_msg_proc(HWND hwnd, UINT msg, WPARAM
     case WM_GET_OBJECT_UIA_NODE:
     {
         HUIANODE node = (HUIANODE)lparam;
-        struct uia_node *node_data;
         LRESULT lr;
 
-        node_data = impl_from_IWineUiaNode((IWineUiaNode *)node);
-        node_data->nested_node = TRUE;
+        if (FAILED(uia_provider_thread_add_node(node)))
+        {
+            WARN("Failed to add node %p to provider thread list.\n", node);
+            UiaNodeRelease(node);
+            return 0;
+        }
 
         /*
          * LresultFromObject returns an index into the global atom string table,
@@ -1239,6 +1412,8 @@ static BOOL uia_start_provider_thread(void)
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                 (const WCHAR *)uia_start_provider_thread, &hmodule);
 
+        list_init(&provider_thread.nodes_list);
+        rb_init(&provider_thread.node_map, uia_runtime_id_compare);
         events[0] = ready_event = CreateEventW(NULL, FALSE, FALSE, NULL);
         if (!(provider_thread.hthread = CreateThread(NULL, 0, uia_provider_thread_proc,
                 ready_event, 0, NULL)))
@@ -1276,6 +1451,8 @@ void uia_stop_provider_thread(void)
     {
         PostMessageW(provider_thread.hwnd, WM_UIA_PROVIDER_THREAD_STOP, 0, 0);
         CloseHandle(provider_thread.hthread);
+        if (!list_empty(&provider_thread.nodes_list))
+            ERR("Provider thread shutdown with nodes still in the list\n");
         memset(&provider_thread, 0, sizeof(provider_thread));
     }
     LeaveCriticalSection(&provider_thread_cs);
@@ -1286,7 +1463,7 @@ void uia_stop_provider_thread(void)
  * Automation has to work regardless of whether or not COM is initialized on
  * the thread calling UiaReturnRawElementProvider.
  */
-static LRESULT uia_lresult_from_node(HUIANODE huianode)
+LRESULT uia_lresult_from_node(HUIANODE huianode)
 {
     if (!uia_start_provider_thread())
     {
@@ -1320,7 +1497,7 @@ LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wparam,
         return 0;
     }
 
-    hr = UiaNodeFromProvider(elprov, &node);
+    hr = create_uia_node_from_elprov(elprov, &node, FALSE);
     if (FAILED(hr))
     {
         WARN("Failed to create HUIANODE with hr %#lx\n", hr);
@@ -1328,4 +1505,34 @@ LRESULT WINAPI UiaReturnRawElementProvider(HWND hwnd, WPARAM wparam,
     }
 
     return uia_lresult_from_node(node);
+}
+
+/***********************************************************************
+ *          UiaDisconnectProvider (uiautomationcore.@)
+ */
+HRESULT WINAPI UiaDisconnectProvider(IRawElementProviderSimple *elprov)
+{
+    SAFEARRAY *sa;
+    HUIANODE node;
+    HRESULT hr;
+
+    TRACE("(%p)\n", elprov);
+
+    hr = create_uia_node_from_elprov(elprov, &node, FALSE);
+    if (FAILED(hr))
+        return hr;
+
+    hr = UiaGetRuntimeId(node, &sa);
+    UiaNodeRelease(node);
+    if (FAILED(hr))
+        return hr;
+
+    if (!sa)
+        return E_INVALIDARG;
+
+    uia_provider_thread_disconnect_node(sa);
+
+    SafeArrayDestroy(sa);
+
+    return S_OK;
 }

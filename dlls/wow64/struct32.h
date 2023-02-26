@@ -21,8 +21,6 @@
 #ifndef __WOW64_STRUCT32_H
 #define __WOW64_STRUCT32_H
 
-#include "wine/server.h"
-
 typedef struct
 {
     ULONG Length;
@@ -155,6 +153,17 @@ typedef struct
     DWORD    Protect;
     DWORD    Type;
 } MEMORY_BASIC_INFORMATION32;
+
+typedef struct
+{
+    ULONG AllocationBase;
+    ULONG AllocationProtect;
+    ULONG RegionType;
+    ULONG RegionSize;
+    ULONG CommitSize;
+    ULONG PartitionId;
+    ULONG NodePreference;
+} MEMORY_REGION_INFORMATION32;
 
 typedef struct
 {
@@ -656,22 +665,11 @@ typedef struct
     ULONG NumberOfBytes;
 } MEMORY_RANGE_ENTRY32;
 
-struct __server_iovec32
+typedef struct
 {
-    ULONG        ptr;
-    data_size_t  size;
-};
-
-struct __server_request_info32
-{
-    union
-    {
-        union generic_request req;
-        union generic_reply   reply;
-    } u;
-    unsigned int            data_count;
-    ULONG                   reply_data;
-    struct __server_iovec32 data[__SERVER_MAX_DATA];
-};
+  ULONG LowestStartingAddress;
+  ULONG HighestEndingAddress;
+  ULONG Alignment;
+} MEM_ADDRESS_REQUIREMENTS32;
 
 #endif /* __WOW64_STRUCT32_H */
