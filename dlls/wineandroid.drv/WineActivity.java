@@ -52,6 +52,8 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import com.shamanland.common.debug.AndroidLogPrintStream;
+
 public class WineActivity extends Activity
 {
     private native String wine_init( String[] cmdline, String[] env );
@@ -75,6 +77,9 @@ public class WineActivity extends Activity
 
         requestWindowFeature( android.view.Window.FEATURE_NO_TITLE );
 
+        System.setErr( new AndroidLogPrintStream(LOGTAG) );
+        System.setOut( new AndroidLogPrintStream(LOGTAG) );
+
         new Thread( new Runnable() { public void run() { loadWine( null ); }} ).start();
     }
 
@@ -91,6 +96,7 @@ public class WineActivity extends Activity
         for (String abi : get_supported_abis())
         {
             File server = new File( getFilesDir(), abi + "/bin/wineserver" );
+            Log.i(LOGTAG, "mmz try: " + abi + server.toString());
             if (server.canExecute()) return abi;
         }
         Log.e( LOGTAG, "could not find a supported ABI" );
@@ -140,6 +146,12 @@ public class WineActivity extends Activity
         {
             File log = new File( getFilesDir(), "log" );
             env.put( "WINEDEBUG", winedebug );
+            env.put( "WINEDEBUGLOG", log.toString() );
+            Log.i( LOGTAG, "logging to " + log.toString() );
+            log.delete();
+        }else{
+            File log = new File( getFilesDir(), "log" );
+            env.put( "WINEDEBUG", "warn+all,err+all" );
             env.put( "WINEDEBUGLOG", log.toString() );
             Log.i( LOGTAG, "logging to " + log.toString() );
             log.delete();

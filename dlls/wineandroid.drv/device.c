@@ -1156,7 +1156,7 @@ NTSTATUS android_dispatch_ioctl( void *arg )
 NTSTATUS android_java_init( void *arg )
 {
     JavaVM *java_vm;
-
+    start_logger();
     if (!(java_vm = *p_java_vm)) return STATUS_UNSUCCESSFUL;  /* not running under Java */
 
     init_java_thread( java_vm );

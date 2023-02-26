@@ -383,6 +383,7 @@ static const JNINativeMethod methods[] =
     } while(0)
 
 DECL_FUNCPTR( __android_log_print );
+DECL_FUNCPTR( __android_log_write );
 DECL_FUNCPTR( ANativeWindow_fromSurface );
 DECL_FUNCPTR( ANativeWindow_release );
 DECL_FUNCPTR( hw_get_module );
@@ -548,12 +549,47 @@ static void load_android_libs(void)
         return;
     }
     LOAD_FUNCPTR( liblog, __android_log_print );
+    LOAD_FUNCPTR( liblog, __android_log_write );
     LOAD_FUNCPTR( libandroid, ANativeWindow_fromSurface );
     LOAD_FUNCPTR( libandroid, ANativeWindow_release );
 }
 
 #undef DECL_FUNCPTR
 #undef LOAD_FUNCPTR
+
+static int pfd[2];
+static pthread_t thr;
+
+static void *thread_func(void*)
+{
+    ssize_t rdsz;
+    char buf[128];
+    while((rdsz = read(pfd[0], buf, sizeof buf - 1)) > 0) {
+        if(buf[rdsz - 1] == '\n') --rdsz;
+        buf[rdsz] = 0;  /* add null-terminator */
+        p__android_log_write(ANDROID_LOG_INFO, "WINEstd", buf);
+    }
+    return 0;
+}
+
+int start_logger()
+{
+    p__android_log_print( ANDROID_LOG_INFO, "wine", "started logger!\n" );
+    /* make stdout line-buffered and stderr unbuffered */
+    setvbuf(stdout, 0, _IOLBF, 0);
+    setvbuf(stderr, 0, _IONBF, 0);
+
+    /* create the pipe and redirect stdout and stderr */
+    pipe(pfd);
+    dup2(pfd[1], 1);
+    dup2(pfd[1], 2);
+
+    /* spawn the logging thread */
+    if(pthread_create(&thr, 0, thread_func, 0) == -1)
+        return -1;
+    pthread_detach(thr);
+    return 0;
+}
 
 JavaVM **p_java_vm = NULL;
 jobject *p_java_object = NULL;
@@ -594,6 +630,7 @@ static HRESULT android_init( void *arg )
         __asm__( "mov %%fs,%0" : "=r" (old_fs) );
 #endif
         load_android_libs();
+        start_logger();
         (*java_vm)->AttachCurrentThread( java_vm, &jni_env, 0 );
         class = (*jni_env)->GetObjectClass( jni_env, object );
         (*jni_env)->RegisterNatives( jni_env, class, methods, ARRAY_SIZE( methods ));

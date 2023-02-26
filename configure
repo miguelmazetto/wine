@@ -743,6 +743,7 @@ CROSSCC
 CROSSTARGET
 LIBWINE_DEPENDS
 PRELINK
+OPENGL_EXTRADLLFLAGS
 WINELOADER_DEPENDS
 LIBWINE_LDFLAGS
 LIBWINE_SHAREDLIB
@@ -6415,7 +6416,7 @@ MAKEDEP=$wine_makedep
 
 RUNTESTFLAGS="-q -P wine"
 
-SED_CMD="LC_ALL=C sed -e 's,@bindir@,\${bindir},g' -e 's,@dlldir@,\${dlldir},g' -e 's,@PACKAGE_STRING@,$PACKAGE_STRING,g' -e 's,@PACKAGE_VERSION@,$PACKAGE_VERSION,g'"
+SED_CMD="LC_ALL=C sed -e 's,@bindir@,\${bindir},g' -e 's,@dlldir@,\${dlldir},g' -e 's,@prefix@,\${prefix},g' -e 's,@PACKAGE_STRING@,$PACKAGE_STRING,g' -e 's,@PACKAGE_VERSION@,$PACKAGE_VERSION,g'"
 
 
 if test -n "$host_alias" -a "$host_alias" != "$build_alias"
@@ -10124,6 +10125,8 @@ printf "%s\n" "#define _GNU_SOURCE 1" >>confdefs.h
     DLLFLAGS="$DLLFLAGS -fPIC"
     LDDLLFLAGS="-fPIC"
     LDEXECFLAGS="-Wl,-pie"
+    OPENGL_EXTRADLLFLAGS="-nostdlib -lc"
+
     enable_wineandroid_drv=${enable_wineandroid_drv:-yes}
     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -Wl,-z,defs" >&5
 printf %s "checking whether the compiler supports -Wl,-z,defs... " >&6; }
@@ -22460,7 +22463,7 @@ programs/winetest/build.nfo:
 	@-\$(CC) -v 2>\$@
 dlls/wineandroid.drv/wine-debug.apk: dlls/wineandroid.drv/build.gradle ${wine_srcdir}dlls/wineandroid.drv/AndroidManifest.xml ${wine_srcdir}dlls/wineandroid.drv/WineActivity.java ${wine_srcdir}dlls/wineandroid.drv/wine.svg
 	cd dlls/wineandroid.drv && gradle -q -Psrcdir=$srcdir assembleDebug
-	mv dlls/wineandroid.drv/build/outputs/apk/wine-debug.apk \$@"
+	mv dlls/wineandroid.drv/build/outputs/apk/debug/wine-debug.apk \$@"
 
 
 TAGSFLAGS="--langmap='c:+.idl.l.rh,make:(Make*.in)'"
@@ -23294,6 +23297,7 @@ METAL_LIBS = $METAL_LIBS
 LIBWINE_SHAREDLIB = $LIBWINE_SHAREDLIB
 LIBWINE_LDFLAGS = $LIBWINE_LDFLAGS
 WINELOADER_DEPENDS = $WINELOADER_DEPENDS
+OPENGL_EXTRADLLFLAGS = $OPENGL_EXTRADLLFLAGS
 PRELINK = $PRELINK
 LIBWINE_DEPENDS = $LIBWINE_DEPENDS
 CROSSTARGET = $CROSSTARGET
